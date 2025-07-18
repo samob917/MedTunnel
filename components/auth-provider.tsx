@@ -7,7 +7,14 @@ import type { User } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 
 interface AuthContextType {
-  user: User | null
+  user:
+    | (User & {
+        subscription_tier?: string
+        subscription_status?: string
+        subscription_current_period_end?: string
+        subscription_cancel_at_period_end?: boolean
+      })
+    | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string) => Promise<void>
@@ -15,12 +22,21 @@ interface AuthContextType {
   usageCount: number
   canUseService: boolean
   incrementUsage: () => Promise<void>
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<
+    | (User & {
+        subscription_tier?: string
+        subscription_status?: string
+        subscription_current_period_end?: string
+        subscription_cancel_at_period_end?: boolean
+      })
+    | null
+  >(null)
   const [loading, setLoading] = useState(true)
   const [usageCount, setUsageCount] = useState(0)
 
@@ -30,6 +46,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(session?.user ?? null)
       if (session?.user) {
         fetchUserUsage(session.user.id)
+      } else {
+        // Load anonymous usage from localStorage
+        const anonymousUsage = localStorage.getItem("anonymous_usage_count")
+        setUsageCount(anonymousUsage ? Number.parseInt(anonymousUsage, 10) : 0)
       }
       setLoading(false)
     })
@@ -42,7 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         await fetchUserUsage(session.user.id)
       } else {
-        setUsageCount(0)
+        // Load anonymous usage from localStorage when signing out
+        const anonymousUsage = localStorage.getItem("anonymous_usage_count")
+        setUsageCount(anonymousUsage ? Number.parseInt(anonymousUsage, 10) : 0)
       }
       setLoading(false)
     })
@@ -53,12 +75,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchUserUsage = async (userId: string) => {
     const { data, error } = await supabase
       .from("users")
-      .select("usage_count, subscription_tier")
+      .select(
+        "usage_count, subscription_tier, subscription_status, subscription_current_period_end, subscription_cancel_at_period_end",
+      )
       .eq("id", userId)
       .single()
 
     if (data) {
       setUsageCount(data.usage_count || 0)
+      // Merge subscription data with user object
+      if (user) {
+        setUser({
+          ...user,
+          subscription_tier: data.subscription_tier,
+          subscription_status: data.subscription_status,
+          subscription_current_period_end: data.subscription_current_period_end,
+          subscription_cancel_at_period_end: data.subscription_cancel_at_period_end,
+        })
+      }
+    }
+  }
+
+  const refreshUser = async () => {
+    if (user) {
+      await fetchUserUsage(user.id)
     }
   }
 
@@ -79,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const incrementUsage = async () => {
     if (user) {
+      // For signed-in users, update database
       const { error } = await supabase
         .from("users")
         .update({ usage_count: usageCount + 1 })
@@ -87,11 +128,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!error) {
         setUsageCount((prev) => prev + 1)
       }
+    } else {
+      // For anonymous users, update localStorage
+      const newCount = usageCount + 1
+      setUsageCount(newCount)
+      localStorage.setItem("anonymous_usage_count", newCount.toString())
     }
   }
 
-  // Non-authenticated users get 1 free use, authenticated free tier gets 5
-  const canUseService = user ? usageCount < 5 : usageCount < 1
+  // Check if user can use service based on subscription
+  const isProUser = user?.subscription_tier === "pro" && user?.subscription_status === "active"
+  const canUseService = user ? isProUser || usageCount < 5 : usageCount < 3
 
   return (
     <AuthContext.Provider
@@ -104,6 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         usageCount,
         canUseService,
         incrementUsage,
+        refreshUser,
       }}
     >
       {children}
