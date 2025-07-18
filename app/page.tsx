@@ -9,9 +9,11 @@ import { Badge } from "@/components/ui/badge"
 import { FileUpload } from "@/components/file-upload"
 import { TunnelSelector } from "@/components/tunnel-selector"
 import { DataPreview } from "@/components/data-preview"
+import { AmionDataPreview } from "@/components/amion-data-preview"
+import { ClinicConfigurationDialog, type AmionConfiguration } from "@/components/clinic-configuration-dialog"
 import { AuthProvider, useAuth } from "@/components/auth-provider"
 import { AuthModal } from "@/components/auth-modal"
-import { processFile, type ProcessedData, exportToCsv, exportToExcel } from "@/lib/file-processor"
+import { processFile, type ProcessedData, exportToCsv, exportToExcel, exportToExcelMultiSheet } from "@/lib/file-processor"
 import { getTunnel, processTunnelData } from "@/lib/tunnel-processor"
 import { supabase } from "@/lib/supabase"
 
@@ -25,6 +27,17 @@ function MedTunnelApp() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [activeTab, setActiveTab] = useState("upload")
   const [showAuthModal, setShowAuthModal] = useState(false)
+  
+  // State for enhanced configuration
+  const [amionConfig, setAmionConfig] = useState<AmionConfiguration>({
+    name: "",
+    clinicMappings: {},
+    residentMappings: {},
+    mergedClinics: {}
+  })
+  const [showMappingConfig, setShowMappingConfig] = useState(false)
+  const [detectedClinics, setDetectedClinics] = useState<string[]>([])
+  const [detectedResidents, setDetectedResidents] = useState<string[]>([])
 
   const [connectionStatus, setConnectionStatus] = useState<string>("Checking...")
 
@@ -43,6 +56,24 @@ function MedTunnelApp() {
     }
     testConnection()
   }, [])
+
+  // Function to detect clinics and residents from converted data
+  const detectClinicsAndResidents = (data: any[]) => {
+    const clinics = new Set<string>()
+    const residents = new Set<string>()
+    
+    data.forEach(row => {
+      if (row.assignment) {
+        clinics.add(row.assignment)
+      }
+      if (row.resident) {
+        residents.add(row.resident)
+      }
+    })
+    
+    setDetectedClinics(Array.from(clinics).sort())
+    setDetectedResidents(Array.from(residents).sort())
+  }
 
   const handleFileUpload = async (file: File) => {
     if (!canUseService) {
@@ -77,10 +108,33 @@ function MedTunnelApp() {
     const tunnel = getTunnel(tunnelId)
     if (!tunnel) return
 
-    const { processedData, errors } = processTunnelData(data.rows, data.headers, tunnel)
+    let dataToProcess = data.rows
+    let headersToProcess = data.headers
+
+    // For Amion tunnel, we need to handle multi-sheet data specially
+    if (tunnelId === "amion" && data.allSheetData) {
+      // Combine all sheets into one dataset for the Amion preProcess function
+      dataToProcess = []
+      data.allSheetData.forEach((sheetData, sheetIndex) => {
+        // Add sheet source information to each row
+        sheetData.forEach((row, rowIndex) => {
+          const augmentedRow = [...row, data.sheetNames?.[sheetIndex] || `Sheet${sheetIndex + 1}`]
+          dataToProcess.push(augmentedRow)
+        })
+      })
+      // Add sheet source to headers
+      headersToProcess = [...headersToProcess, "_sheet_source"]
+    }
+
+    const { processedData, errors } = processTunnelData(dataToProcess, headersToProcess, tunnel)
 
     setConvertedData(processedData)
     setConversionErrors(errors)
+    
+    // Detect clinics and residents for Amion tunnel
+    if (tunnelId === "amion") {
+      detectClinicsAndResidents(processedData)
+    }
   }
 
   const handleDownload = (format: "csv" | "excel") => {
@@ -91,8 +145,24 @@ function MedTunnelApp() {
     if (format === "csv") {
       exportToCsv(convertedData, `${filename}.csv`)
     } else {
-      exportToExcel(convertedData, `${filename}.xlsx`)
+      // Use multi-sheet export for Amion tunnel
+      if (selectedTunnel === "amion") {
+        // Apply resident name mappings to the data before export
+        const mappedData = convertedData.map(row => ({
+          ...row,
+          displayName: amionConfig.residentMappings[row.resident] || row.displayName
+        }))
+        
+        exportToExcelMultiSheet(mappedData, `${filename}.xlsx`, amionConfig.clinicMappings, amionConfig.mergedClinics)
+      } else {
+        exportToExcel(convertedData, `${filename}.xlsx`)
+      }
     }
+  }
+
+  // Handle configuration save
+  const handleConfigurationSave = (config: AmionConfiguration) => {
+    setAmionConfig(config)
   }
 
   return (
@@ -108,42 +178,45 @@ function MedTunnelApp() {
 
           <div className="flex items-center gap-4">
             {user ? (
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">{usageCount}/5 uses</Badge>
-                <Button variant="ghost" size="sm" onClick={signOut}>
+              <>
+                <div className="text-right">
+                  <p className="text-sm text-gray-600">{user.email}</p>
+                  <p className="text-xs text-gray-500">
+                    {usageCount} / {user.subscription_tier === "free" ? "5" : "Unlimited"} conversions
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={signOut}>
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign Out
                 </Button>
-              </div>
+              </>
             ) : (
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">{usageCount}/1 free use</Badge>
-                <Button variant="outline" size="sm" onClick={() => setShowAuthModal(true)}>
-                  <User className="w-4 h-4 mr-2" />
-                  Sign In
-                </Button>
-              </div>
+              <Button onClick={() => setShowAuthModal(true)}>
+                <User className="w-4 h-4 mr-2" />
+                Sign In
+              </Button>
             )}
           </div>
         </div>
 
-        <div className="max-w-6xl mx-auto">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        {/* Main Content */}
+        <div className="max-w-4xl mx-auto">
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="upload" className="flex items-center gap-2">
-                <Upload className="w-4 h-4" />
+              <TabsTrigger value="upload">
+                <Upload className="w-4 h-4 mr-2" />
                 Upload
               </TabsTrigger>
-              <TabsTrigger value="tunnel" disabled={!parsedData} className="flex items-center gap-2">
-                <Settings className="w-4 h-4" />
-                Select Tunnel
+              <TabsTrigger value="tunnel" disabled={!parsedData}>
+                <Settings className="w-4 h-4 mr-2" />
+                Tunnel
               </TabsTrigger>
-              <TabsTrigger value="preview" disabled={!selectedTunnel} className="flex items-center gap-2">
-                <Eye className="w-4 h-4" />
+              <TabsTrigger value="preview" disabled={!selectedTunnel || convertedData.length === 0}>
+                <Eye className="w-4 h-4 mr-2" />
                 Preview
               </TabsTrigger>
-              <TabsTrigger value="download" disabled={!convertedData.length} className="flex items-center gap-2">
-                <Download className="w-4 h-4" />
+              <TabsTrigger value="download" disabled={convertedData.length === 0}>
+                <Download className="w-4 h-4 mr-2" />
                 Download
               </TabsTrigger>
             </TabsList>
@@ -165,6 +238,8 @@ function MedTunnelApp() {
                       </p>
                       <p className="text-sm text-green-600 mt-1">
                         {parsedData.totalRows} rows, {parsedData.headers.length} columns
+                        {parsedData.sheetNames && parsedData.sheetNames.length > 1 && 
+                          ` across ${parsedData.sheetNames.length} sheets`}
                       </p>
                     </div>
                   )}
@@ -191,12 +266,22 @@ function MedTunnelApp() {
                   <CardDescription>Review your data before downloading the converted file</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <DataPreview
-                    originalData={parsedData}
-                    convertedData={convertedData}
-                    errors={conversionErrors}
-                    isProcessing={isProcessing}
-                  />
+                  {selectedTunnel === "amion" ? (
+                    <AmionDataPreview
+                      convertedData={convertedData}
+                      clinicMapping={amionConfig.clinicMappings}
+                      mergedClinics={amionConfig.mergedClinics}
+                      errors={conversionErrors}
+                      onConfigureClick={() => setShowMappingConfig(true)}
+                    />
+                  ) : (
+                    <DataPreview
+                      originalData={parsedData}
+                      convertedData={convertedData}
+                      errors={conversionErrors}
+                      isProcessing={isProcessing}
+                    />
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -236,6 +321,15 @@ function MedTunnelApp() {
       </div>
 
       <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
+      <ClinicConfigurationDialog
+        open={showMappingConfig}
+        onOpenChange={setShowMappingConfig}
+        detectedClinics={detectedClinics}
+        detectedResidents={detectedResidents}
+        onSave={handleConfigurationSave}
+        currentConfig={amionConfig}
+        userEmail={user?.email}
+      />
     </div>
   )
 }

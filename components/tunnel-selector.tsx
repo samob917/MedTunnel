@@ -1,5 +1,5 @@
 "use client"
-import { Settings, FileText, DollarSign } from "lucide-react"
+import { Settings, FileText, DollarSign, Calendar } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -13,6 +13,7 @@ interface TunnelSelectorProps {
 const tunnelIcons: Record<string, any> = {
   "medical-records": FileText,
   "financial-data": DollarSign,
+  "amion": Calendar,
 }
 
 export function TunnelSelector({ onTunnelSelect, selectedTunnel }: TunnelSelectorProps) {
@@ -57,6 +58,11 @@ export function TunnelSelector({ onTunnelSelect, selectedTunnel }: TunnelSelecto
                   {tunnel.validation && (
                     <Badge variant="outline" className="text-xs">
                       Validation included
+                    </Badge>
+                  )}
+                  {tunnel.preProcess && (
+                    <Badge variant="outline" className="text-xs">
+                      Special format
                     </Badge>
                   )}
                   {tunnel.postProcess && (

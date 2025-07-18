@@ -1,5 +1,6 @@
 import { medicalRecordsTunnel } from "./tunnels/medical-records.js"
 import { financialDataTunnel } from "./tunnels/financial-data.js"
+import { amionTunnel } from "./tunnels/amion.js"
 
 export interface TunnelConfig {
   id: string
@@ -9,6 +10,13 @@ export interface TunnelConfig {
   fieldMappings: FieldMapping[]
   additionalFields?: AdditionalField[]
   validation?: ValidationConfig
+  preProcess?: (data: any[][], headers: string[], config?: any) => {
+    headers: string[]
+    rows: any[][]
+    errors: string[]
+    ambiguousShifts?: any[]  // Added for Amion single-row residents
+    assignments?: any[]      // Added for partial assignments
+  }
   postProcess?: (data: any[]) => any[]
 }
 
@@ -38,10 +46,17 @@ export interface ValidationRule {
   message: string
 }
 
+export interface ProcessTunnelResult {
+  processedData: any[]
+  errors: string[]
+  ambiguousShifts?: any[]  // For Amion single-row residents
+}
+
 // Registry of all available tunnels
 export const tunnelRegistry: Record<string, TunnelConfig> = {
   "medical-records": medicalRecordsTunnel,
   "financial-data": financialDataTunnel,
+  "amion": amionTunnel,
 }
 
 export function getTunnel(tunnelId: string): TunnelConfig | null {
@@ -57,12 +72,39 @@ export function processTunnelData(
   headers: string[],
   tunnel: TunnelConfig,
   customMappings?: Record<string, string>,
-): { processedData: any[]; errors: string[] } {
-  const errors: string[] = []
+): ProcessTunnelResult {
+  let processedHeaders = headers
+  let processedRows = data
+  let preProcessErrors: string[] = []
+  let ambiguousShifts: any[] | undefined
+
+  // Apply pre-processing if available (for special formats like Amion)
+  if (tunnel.preProcess) {
+    const preProcessed = tunnel.preProcess(data, headers, customMappings)
+    processedHeaders = preProcessed.headers
+    processedRows = preProcessed.rows
+    preProcessErrors = preProcessed.errors || []
+    
+    // Check for ambiguous shifts (Amion single-row residents)
+    if (preProcessed.ambiguousShifts && preProcessed.ambiguousShifts.length > 0) {
+      ambiguousShifts = preProcessed.ambiguousShifts
+      // If we have assignments ready, use them
+      if (preProcessed.assignments) {
+        // Return early with partial data and ambiguous shifts
+        return {
+          processedData: preProcessed.assignments || [],
+          errors: preProcessErrors,
+          ambiguousShifts
+        }
+      }
+    }
+  }
+
+  const errors: string[] = [...preProcessErrors]
   const processedData: any[] = []
 
   // Create header mapping
-  const headerMap = headers.reduce(
+  const headerMap = processedHeaders.reduce(
     (map, header, index) => {
       map[header] = index
       return map
@@ -71,7 +113,7 @@ export function processTunnelData(
   )
 
   // Process each row
-  data.forEach((row, rowIndex) => {
+  processedRows.forEach((row, rowIndex) => {
     if (tunnel.validation?.skipEmptyRows && row.every((cell) => !cell)) {
       return
     }
@@ -82,6 +124,7 @@ export function processTunnelData(
     // Process field mappings
     tunnel.fieldMappings.forEach((mapping) => {
       const sourceIndex = headerMap[mapping.source]
+
       if (sourceIndex === undefined) {
         if (mapping.required) {
           errors.push(`Row ${rowIndex + 1}: Required field '${mapping.source}' not found`)
@@ -155,5 +198,9 @@ export function processTunnelData(
     finalData = tunnel.postProcess(processedData)
   }
 
-  return { processedData: finalData, errors }
+  return { 
+    processedData: finalData, 
+    errors,
+    ambiguousShifts 
+  }
 }
