@@ -50,9 +50,12 @@ async function processExcelFile(file: File): Promise<ProcessedData> {
         const data = new Uint8Array(e.target?.result as ArrayBuffer)
         const workbook = XLSX.read(data, { type: "array" })
         const sheetName = workbook.SheetNames[0]
+        console.log(sheetName)
         const worksheet = workbook.Sheets[sheetName]
+        console.log(worksheet)
 
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][]
+        console.log("Uploaded File:", jsonData)
         const headers = jsonData[0] || []
         const rows = jsonData.slice(1)
 
