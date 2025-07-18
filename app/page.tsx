@@ -1,11 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Upload, Download, Eye, Settings, User, LogOut } from "lucide-react"
+import { User, LogOut, Upload, Download, Eye, Settings, Crown, CreditCard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { FileUpload } from "@/components/file-upload"
 import { TunnelSelector } from "@/components/tunnel-selector"
 import { DataPreview } from "@/components/data-preview"
@@ -13,7 +13,15 @@ import { AmionDataPreview } from "@/components/amion-data-preview"
 import { ClinicConfigurationDialog, type AmionConfiguration } from "@/components/clinic-configuration-dialog"
 import { AuthProvider, useAuth } from "@/components/auth-provider"
 import { AuthModal } from "@/components/auth-modal"
-import { processFile, type ProcessedData, exportToCsv, exportToExcel, exportToExcelMultiSheet } from "@/lib/file-processor"
+import { SubscriptionManager } from "@/components/subscription-manager"
+import { LimitReachedModal } from "@/components/limit-reached-modal"
+import {
+  processFile,
+  type ProcessedData,
+  exportToCsv,
+  exportToExcel,
+  exportToExcelMultiSheet,
+} from "@/lib/file-processor"
 import { getTunnel, processTunnelData } from "@/lib/tunnel-processor"
 import { supabase } from "@/lib/supabase"
 
@@ -27,19 +35,24 @@ function MedTunnelApp() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [activeTab, setActiveTab] = useState("upload")
   const [showAuthModal, setShowAuthModal] = useState(false)
-  
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
+  const [showLimitModal, setShowLimitModal] = useState(false)
+
   // State for enhanced configuration
   const [amionConfig, setAmionConfig] = useState<AmionConfiguration>({
     name: "",
     clinicMappings: {},
     residentMappings: {},
-    mergedClinics: {}
+    mergedClinics: {},
   })
   const [showMappingConfig, setShowMappingConfig] = useState(false)
   const [detectedClinics, setDetectedClinics] = useState<string[]>([])
   const [detectedResidents, setDetectedResidents] = useState<string[]>([])
 
   const [connectionStatus, setConnectionStatus] = useState<string>("Checking...")
+
+  // Check if user is pro (mock some users as pro for demo)
+  const isProUser = user?.subscription_tier === "pro" && user?.subscription_status === "active"
 
   useEffect(() => {
     const testConnection = async () => {
@@ -61,8 +74,8 @@ function MedTunnelApp() {
   const detectClinicsAndResidents = (data: any[]) => {
     const clinics = new Set<string>()
     const residents = new Set<string>()
-    
-    data.forEach(row => {
+
+    data.forEach((row) => {
       if (row.assignment) {
         clinics.add(row.assignment)
       }
@@ -70,14 +83,19 @@ function MedTunnelApp() {
         residents.add(row.resident)
       }
     })
-    
+
     setDetectedClinics(Array.from(clinics).sort())
     setDetectedResidents(Array.from(residents).sort())
   }
 
   const handleFileUpload = async (file: File) => {
     if (!canUseService) {
-      setShowAuthModal(true)
+      // Show appropriate modal based on user type
+      if (!user) {
+        setShowLimitModal(true)
+      } else if (!isProUser) {
+        setShowLimitModal(true)
+      }
       return
     }
 
@@ -130,7 +148,7 @@ function MedTunnelApp() {
 
     setConvertedData(processedData)
     setConversionErrors(errors)
-    
+
     // Detect clinics and residents for Amion tunnel
     if (tunnelId === "amion") {
       detectClinicsAndResidents(processedData)
@@ -148,11 +166,11 @@ function MedTunnelApp() {
       // Use multi-sheet export for Amion tunnel
       if (selectedTunnel === "amion") {
         // Apply resident name mappings to the data before export
-        const mappedData = convertedData.map(row => ({
+        const mappedData = convertedData.map((row) => ({
           ...row,
-          displayName: amionConfig.residentMappings[row.resident] || row.displayName
+          displayName: amionConfig.residentMappings[row.resident] || row.displayName,
         }))
-        
+
         exportToExcelMultiSheet(mappedData, `${filename}.xlsx`, amionConfig.clinicMappings, amionConfig.mergedClinics)
       } else {
         exportToExcel(convertedData, `${filename}.xlsx`)
@@ -163,6 +181,23 @@ function MedTunnelApp() {
   // Handle configuration save
   const handleConfigurationSave = (config: AmionConfiguration) => {
     setAmionConfig(config)
+  }
+
+  // Determine user type for limit modal
+  const getUserType = () => {
+    if (!user) return "anonymous"
+    if (isProUser) return "pro"
+    return "free"
+  }
+
+  const handleLimitModalSignUp = () => {
+    setShowLimitModal(false)
+    setShowAuthModal(true)
+  }
+
+  const handleLimitModalUpgrade = () => {
+    setShowLimitModal(false)
+    setShowSubscriptionModal(true)
   }
 
   return (
@@ -180,21 +215,34 @@ function MedTunnelApp() {
             {user ? (
               <>
                 <div className="text-right">
-                  <p className="text-sm text-gray-600">{user.email}</p>
+                  <p className="text-sm text-gray-600 flex items-center gap-1">
+                    {user.email}
+                    {isProUser && <Crown className="w-4 h-4 text-yellow-500" />}
+                  </p>
                   <p className="text-xs text-gray-500">
-                    {usageCount} / {user.subscription_tier === "free" ? "5" : "Unlimited"} conversions
+                    {isProUser ? "Unlimited conversions" : `${usageCount} / 5 conversions`}
                   </p>
                 </div>
+                <Button variant="outline" size="sm" onClick={() => setShowSubscriptionModal(true)}>
+                  <CreditCard className="w-4 h-4 mr-2" />
+                  {isProUser ? "Manage" : "Upgrade"}
+                </Button>
                 <Button variant="outline" size="sm" onClick={signOut}>
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign Out
                 </Button>
               </>
             ) : (
-              <Button onClick={() => setShowAuthModal(true)}>
-                <User className="w-4 h-4 mr-2" />
-                Sign In
-              </Button>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-sm text-gray-600">Anonymous User</p>
+                  <p className="text-xs text-gray-500">{usageCount} / 3 conversions</p>
+                </div>
+                <Button onClick={() => setShowAuthModal(true)}>
+                  <User className="w-4 h-4 mr-2" />
+                  Sign In
+                </Button>
+              </div>
             )}
           </div>
         </div>
@@ -238,7 +286,8 @@ function MedTunnelApp() {
                       </p>
                       <p className="text-sm text-green-600 mt-1">
                         {parsedData.totalRows} rows, {parsedData.headers.length} columns
-                        {parsedData.sheetNames && parsedData.sheetNames.length > 1 && 
+                        {parsedData.sheetNames &&
+                          parsedData.sheetNames.length > 1 &&
                           ` across ${parsedData.sheetNames.length} sheets`}
                       </p>
                     </div>
@@ -321,6 +370,15 @@ function MedTunnelApp() {
       </div>
 
       <AuthModal open={showAuthModal} onOpenChange={setShowAuthModal} />
+
+      <LimitReachedModal
+        open={showLimitModal}
+        onOpenChange={setShowLimitModal}
+        userType={getUserType()}
+        onSignUp={handleLimitModalSignUp}
+        onUpgrade={handleLimitModalUpgrade}
+      />
+
       <ClinicConfigurationDialog
         open={showMappingConfig}
         onOpenChange={setShowMappingConfig}
@@ -330,6 +388,17 @@ function MedTunnelApp() {
         currentConfig={amionConfig}
         userEmail={user?.email}
       />
+
+      {/* Subscription Management Modal */}
+      <Dialog open={showSubscriptionModal} onOpenChange={setShowSubscriptionModal}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Subscription Management</DialogTitle>
+            <DialogDescription>Manage your MedTunnel subscription and billing</DialogDescription>
+          </DialogHeader>
+          <SubscriptionManager onClose={() => setShowSubscriptionModal(false)} />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
