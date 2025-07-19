@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
 
 async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string
+  console.log("SUBSCRIPTION", subscription)
 
   // Find user by Stripe customer ID
   const { data: userData } = await supabase.from("users").select("id").eq("stripe_customer_id", customerId).single()
@@ -67,7 +68,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
       stripe_subscription_id: subscription.id,
       subscription_status: subscription.status,
       subscription_tier: subscription.status === "active" ? "pro" : "free",
-      subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+      //subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
       subscription_cancel_at_period_end: subscription.cancel_at_period_end,
       // Reset usage count when subscription becomes active
       usage_count: subscription.status === "active" ? 0 : undefined,
