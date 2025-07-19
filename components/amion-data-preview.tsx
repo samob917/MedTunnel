@@ -1,3 +1,5 @@
+"use client"
+
 import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -5,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { AlertCircle, Settings, Calendar, Users } from "lucide-react"
+import { AmbiguousShiftsResolver } from "./ambiguous-shifts-resolver"
 
 interface AmionDataPreviewProps {
   convertedData: any[]
@@ -12,16 +15,39 @@ interface AmionDataPreviewProps {
   mergedClinics?: Record<string, string[]>
   errors: string[]
   onConfigureClick?: () => void
+  ambiguousShifts?: any[]
+  onResolveAmbiguousShifts?: (resolvedShifts: any[]) => void
 }
 
-export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClinics = {}, errors, onConfigureClick }: AmionDataPreviewProps) {
+export function AmionDataPreview({
+  convertedData,
+  clinicMapping = {},
+  mergedClinics = {},
+  errors,
+  onConfigureClick,
+  ambiguousShifts,
+  onResolveAmbiguousShifts,
+}: AmionDataPreviewProps) {
+  // Handle ambiguous shifts first
+  if (ambiguousShifts && ambiguousShifts.length > 0 && onResolveAmbiguousShifts) {
+    return (
+      <AmbiguousShiftsResolver
+        ambiguousShifts={ambiguousShifts}
+        onResolve={onResolveAmbiguousShifts}
+        onCancel={() => {
+          console.log("User cancelled ambiguous shift resolution")
+        }}
+      />
+    )
+  }
+
   // Group data by clinic
   const clinicData: { [clinic: string]: any[] } = {}
-  
-  convertedData.forEach(row => {
+
+  convertedData.forEach((row) => {
     const originalClinic = row.assignment || "Unassigned"
     let targetSheet = clinicMapping[originalClinic] || originalClinic
-    
+
     // Check if this clinic is part of a merge
     for (const [mergeName, clinics] of Object.entries(mergedClinics)) {
       if (clinics.includes(originalClinic)) {
@@ -29,74 +55,74 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
         break
       }
     }
-    
+
     if (!clinicData[targetSheet]) {
       clinicData[targetSheet] = []
     }
-    
+
     clinicData[targetSheet].push(row)
   })
-  
+
   // Get sorted clinic names
   const clinicNames = Object.keys(clinicData).sort()
   const [activeClinic, setActiveClinic] = useState(clinicNames[0] || "")
-  
+
   // Helper function to get day of week
   const getDayOfWeek = (dateStr: string): string => {
     const date = new Date(dateStr)
     const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     return days[date.getDay()]
   }
-  
+
   // Transform data to output format for a specific clinic
   const getClinicOutputData = (clinicName: string) => {
     const clinicRows = clinicData[clinicName] || []
-    
+
     // Sort by date and shift
     const sortedRows = clinicRows.sort((a, b) => {
       const dateCompare = new Date(a.date).getTime() - new Date(b.date).getTime()
       if (dateCompare !== 0) return dateCompare
-      
+
       if (a.shift === "AM" && b.shift === "PM") return -1
       if (a.shift === "PM" && b.shift === "AM") return 1
-      
+
       return 0
     })
-    
+
     // Group by date
-    const dateGroups: { [date: string]: { am: string[], pm: string[] } } = {}
-    
-    sortedRows.forEach(row => {
+    const dateGroups: { [date: string]: { am: string[]; pm: string[] } } = {}
+
+    sortedRows.forEach((row) => {
       if (!dateGroups[row.date]) {
         dateGroups[row.date] = { am: [], pm: [] }
       }
-      
+
       if (row.shift === "AM") {
         dateGroups[row.date].am.push(row.displayName)
       } else {
         dateGroups[row.date].pm.push(row.displayName)
       }
     })
-    
+
     // Convert to output format
     const outputRows: any[] = []
-    
+
     Object.entries(dateGroups).forEach(([date, shifts]) => {
       const maxCount = Math.max(shifts.am.length, shifts.pm.length)
-      
+
       for (let i = 0; i < maxCount; i++) {
         outputRows.push({
           date: i === 0 ? date : "",
           dayOfWeek: i === 0 ? getDayOfWeek(date) : "",
           am: shifts.am[i] || "",
-          pm: shifts.pm[i] || ""
+          pm: shifts.pm[i] || "",
         })
       }
     })
-    
+
     return outputRows
   }
-  
+
   return (
     <div className="space-y-6">
       {errors.length > 0 && (
@@ -109,13 +135,11 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
             {errors.slice(0, 5).map((error, idx) => (
               <li key={idx}>• {error}</li>
             ))}
-            {errors.length > 5 && (
-              <li className="italic">... and {errors.length - 5} more warnings</li>
-            )}
+            {errors.length > 5 && <li className="italic">... and {errors.length - 5} more warnings</li>}
           </ul>
         </div>
       )}
-      
+
       {/* Header Section */}
       <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 border border-blue-100">
         <div className="flex items-center justify-between">
@@ -129,18 +153,18 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
             </p>
           </div>
           {onConfigureClick && (
-            <Button 
-              onClick={onConfigureClick} 
+            <Button
+              onClick={onConfigureClick}
               variant="outline"
               size="sm"
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 bg-transparent"
             >
               <Settings className="w-4 h-4" />
               Configure Names
             </Button>
           )}
         </div>
-        
+
         {/* Stats Summary */}
         <div className="mt-4 flex gap-4">
           <div className="flex items-center gap-2">
@@ -157,7 +181,7 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
           </div>
         </div>
       </div>
-      
+
       {/* Clinic Selector - Desktop: Tabs, Mobile: Dropdown */}
       <div className="space-y-4">
         {/* Mobile Dropdown (hidden on larger screens) */}
@@ -167,7 +191,7 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
               <SelectValue placeholder="Select a clinic" />
             </SelectTrigger>
             <SelectContent>
-              {clinicNames.map(clinic => (
+              {clinicNames.map((clinic) => (
                 <SelectItem key={clinic} value={clinic}>
                   <div className="flex items-center justify-between w-full">
                     <span>{clinic}</span>
@@ -180,12 +204,12 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
             </SelectContent>
           </Select>
         </div>
-        
+
         {/* Desktop Tabs (hidden on mobile) */}
         <div className="hidden md:block">
           <div className="border rounded-lg bg-gray-50 p-2">
             <div className="flex flex-wrap gap-2">
-              {clinicNames.map(clinic => (
+              {clinicNames.map((clinic) => (
                 <Button
                   key={clinic}
                   variant={activeClinic === clinic ? "default" : "ghost"}
@@ -194,10 +218,7 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
                   className="flex items-center gap-2"
                 >
                   <span className="font-medium">{clinic}</span>
-                  <Badge 
-                    variant={activeClinic === clinic ? "secondary" : "outline"} 
-                    className="text-xs"
-                  >
+                  <Badge variant={activeClinic === clinic ? "secondary" : "outline"} className="text-xs">
                     {clinicData[clinic].length}
                   </Badge>
                 </Button>
@@ -205,7 +226,7 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
             </div>
           </div>
         </div>
-        
+
         {/* Preview Card */}
         <Card className="border-2">
           <CardHeader className="bg-gray-50 border-b">
@@ -228,28 +249,28 @@ export function AmionDataPreview({ convertedData, clinicMapping = {}, mergedClin
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {getClinicOutputData(activeClinic).slice(0, 20).map((row, idx) => (
-                    <TableRow key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
-                      <TableCell className="font-medium">
-                        {row.date}
-                      </TableCell>
-                      <TableCell>{row.dayOfWeek}</TableCell>
-                      <TableCell>
-                        {row.am && (
-                          <span className="inline-flex items-center px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-sm">
-                            {row.am}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {row.pm && (
-                          <span className="inline-flex items-center px-2 py-1 rounded-md bg-purple-50 text-purple-700 text-sm">
-                            {row.pm}
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {getClinicOutputData(activeClinic)
+                    .slice(0, 20)
+                    .map((row, idx) => (
+                      <TableRow key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                        <TableCell className="font-medium">{row.date}</TableCell>
+                        <TableCell>{row.dayOfWeek}</TableCell>
+                        <TableCell>
+                          {row.am && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-sm">
+                              {row.am}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {row.pm && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-md bg-purple-50 text-purple-700 text-sm">
+                              {row.pm}
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
                 </TableBody>
               </Table>
               {getClinicOutputData(activeClinic).length > 20 && (
