@@ -67,8 +67,12 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
       stripe_subscription_id: subscription.id,
       subscription_status: subscription.status,
       subscription_tier: subscription.status === "active" ? "pro" : "free",
-      subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-      subscription_cancel_at_period_end: subscription.cancel_at_period_end,
+      subscription_current_period_end: (subscription as any).current_period_end 
+        ? new Date((subscription as any).current_period_end * 1000).toISOString()
+        : subscription.billing_cycle_anchor
+        ? new Date(subscription.billing_cycle_anchor * 1000).toISOString()
+        : null,
+      subscription_cancel_at_period_end: subscription.cancel_at_period_end ?? false,
       // Reset usage count when subscription becomes active
       usage_count: subscription.status === "active" ? 0 : undefined,
     })
