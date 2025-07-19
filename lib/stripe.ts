@@ -1,21 +1,25 @@
-import Stripe from "stripe"
+// lib/stripe.ts - Client-safe version (can be imported anywhere)
 import { loadStripe } from "@stripe/stripe-js"
 
-// Server-side Stripe instance
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-12-18.acacia",
-})
-
 // Client-side Stripe instance
+let stripePromise: ReturnType<typeof loadStripe> | null = null
+
 export const getStripe = () => {
-  return loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!)
+  if (!stripePromise) {
+    const key = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+    if (!key) {
+      console.error("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is not defined")
+      return null
+    }
+    stripePromise = loadStripe(key)
+  }
+  return stripePromise
 }
 
-// Product and price configuration
+// Client-safe configuration (no secret keys or server-only data)
 export const STRIPE_CONFIG = {
   products: {
     pro: {
-      priceId: process.env.STRIPE_PRO_PRICE_ID!,
       name: "MedTunnel Pro",
       price: 200, // $2.00 in cents
       features: ["Unlimited conversions", "Priority support", "Advanced export options", "Configuration saving"],

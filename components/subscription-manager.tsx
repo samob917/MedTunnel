@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Loader2, Crown, CreditCard, X, Check } from "lucide-react"
 import { useAuth } from "./auth-provider"
+import { getStripe } from "@/lib/stripe"
+
 
 interface SubscriptionManagerProps {
   onClose?: () => void
@@ -24,13 +26,34 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
 
     setLoading(true)
     try {
-      // Mock the upgrade process for demo
-      alert("Mock Upgrade: This would redirect to Stripe Checkout for $2/month subscription")
+      const response = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          userEmail: user.email,
+        }),
+      })
 
-      // Simulate API call delay
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      if (!response.ok) {
+        throw new Error("Failed to create checkout session")
+      }
+
+      const { sessionId } = await response.json()
+      const stripe = await getStripe()
+
+      if (stripe) {
+        const { error } = await stripe.redirectToCheckout({ sessionId })
+        if (error) {
+          console.error("Stripe checkout error:", error)
+          alert("Failed to redirect to checkout. Please try again.")
+        }
+      }
     } catch (error) {
       console.error("Error creating checkout session:", error)
+      alert("Failed to start checkout. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -41,19 +64,32 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
 
     setActionLoading(action)
     try {
-      // Mock the management actions
-      if (action === "portal") {
-        alert("Mock Portal: This would open Stripe Customer Portal in a new tab")
-      } else if (action === "cancel") {
-        alert("Mock Cancel: This would cancel the subscription at period end")
-      } else if (action === "reactivate") {
-        alert("Mock Reactivate: This would reactivate the subscription")
+      const response = await fetch("/api/stripe/manage-subscription", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          action,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to manage subscription")
       }
 
-      // Simulate API call delay
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      const result = await response.json()
+
+      if (action === "portal" && result.url) {
+        window.open(result.url, "_blank")
+      } else {
+        // Refresh user data to get updated subscription status
+        await refreshUser()
+      }
     } catch (error) {
       console.error("Error managing subscription:", error)
+      alert("Failed to manage subscription. Please try again.")
     } finally {
       setActionLoading(null)
     }
@@ -66,10 +102,6 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
       day: "numeric",
     })
   }
-
-  // Mock subscription end date for demo
-  const mockEndDate = new Date()
-  mockEndDate.setMonth(mockEndDate.getMonth() + 1)
 
   return (
     <div className="space-y-6">
@@ -106,14 +138,14 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
             </div>
 
             {/* Subscription Details */}
-            {isProUser && (
+            {isProUser && user?.subscription_current_period_end && (
               <div className="space-y-2 text-sm text-gray-600">
                 <p>
-                  <strong>Next billing date:</strong> {formatDate(mockEndDate.toISOString())}
+                  <strong>Next billing date:</strong> {formatDate(user.subscription_current_period_end)}
                 </p>
                 {isCanceling && (
                   <p className="text-amber-600">
-                    <strong>Status:</strong> Will cancel on {formatDate(mockEndDate.toISOString())}
+                    <strong>Status:</strong> Will cancel on {formatDate(user.subscription_current_period_end)}
                   </p>
                 )}
               </div>

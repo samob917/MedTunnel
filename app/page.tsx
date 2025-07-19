@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from "@/components/auth-provider"
 import { AuthModal } from "@/components/auth-modal"
 import { SubscriptionManager } from "@/components/subscription-manager"
 import { LimitReachedModal } from "@/components/limit-reached-modal"
+
 import {
   processFile,
   type ProcessedData,
