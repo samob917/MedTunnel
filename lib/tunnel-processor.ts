@@ -54,8 +54,6 @@ export interface ProcessTunnelResult {
 
 // Registry of all available tunnels
 export const tunnelRegistry: Record<string, TunnelConfig> = {
-  "medical-records": medicalRecordsTunnel,
-  "financial-data": financialDataTunnel,
   "amion": amionTunnel,
 }
 
