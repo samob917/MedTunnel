@@ -1,3 +1,4 @@
+
 import { type NextRequest, NextResponse } from "next/server"
 import { stripe } from "@/lib/stripe-server"
 import { supabase } from "@/lib/supabase"
@@ -22,8 +23,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 400 })
     }
 
+    console.log("Event type:", event.type)
+
     // Handle the event
     switch (event.type) {
+      // THIS IS THE MISSING HANDLER!
+      case "checkout.session.completed":
+        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session)
+        break
+
       case "customer.subscription.created":
       case "customer.subscription.updated":
         await handleSubscriptionUpdate(event.data.object as Stripe.Subscription)
@@ -52,6 +60,76 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// NEW FUNCTION: Handle checkout completion
+async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
+  console.log('Checkout session completed:', session.id)
+  
+  // Get customer and subscription info
+  const customerId = session.customer as string
+  const subscriptionId = session.subscription as string
+  const userEmail = session.customer_email
+  const userId = session.client_reference_id || session.metadata?.user_id
+  
+  console.log('Session data:', { customerId, subscriptionId, userEmail, userId })
+  
+  // Try to find the user
+  let userData;
+  
+  // First try by user ID (most reliable if user was logged in)
+  if (userId) {
+    const { data } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .single()
+    userData = data
+  }
+  
+  // If not found, try by email
+  if (!userData && userEmail) {
+    const { data } = await supabase
+      .from("users")
+      .select("*")
+      .eq("email", userEmail)
+      .single()
+    userData = data
+  }
+  
+  // If still not found, try by customer ID
+  if (!userData && customerId) {
+    const { data } = await supabase
+      .from("users")
+      .select("*")
+      .eq("stripe_customer_id", customerId)
+      .single()
+    userData = data
+  }
+  
+  if (!userData) {
+    console.error('User not found for checkout session:', session.id)
+    // You might want to create a new user here or send an alert
+    return
+  }
+  
+  // Update user with subscription info
+  const { error } = await supabase
+    .from("users")
+    .update({
+      stripe_customer_id: customerId,
+      stripe_subscription_id: subscriptionId,
+      subscription_status: 'active',
+      subscription_tier: 'pro',
+      usage_count: 0, // Reset usage for new pro users
+    })
+    .eq("id", userData.id)
+    
+  if (error) {
+    console.error('Error updating user subscription:', error)
+  } else {
+    console.log('Successfully activated subscription for user:', userData.email)
+  }
+}
+
 async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
   const customerId = subscription.customer as string
 
@@ -63,18 +141,13 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     return
   }
 
-  // Update user subscription data
+  // Update user subscription data (without period end)
   await supabase
     .from("users")
     .update({
       stripe_subscription_id: subscription.id,
       subscription_status: subscription.status,
       subscription_tier: subscription.status === "active" ? "pro" : "free",
-      subscription_current_period_end: (subscription as any).current_period_end 
-        ? new Date((subscription as any).current_period_end * 1000).toISOString()
-        : subscription.billing_cycle_anchor
-        ? new Date(subscription.billing_cycle_anchor * 1000).toISOString()
-        : null,
       subscription_cancel_at_period_end: subscription.cancel_at_period_end ?? false,
       // Reset usage count when subscription becomes active
       usage_count: subscription.status === "active" ? 0 : undefined,
