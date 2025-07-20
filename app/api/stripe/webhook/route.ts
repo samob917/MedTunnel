@@ -6,9 +6,12 @@ import type Stripe from "stripe"
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
 
 export async function POST(request: NextRequest) {
+  console.log("Webhook received!")
+  console.log("Webhook secret exists:", !!process.env.STRIPE_WEBHOOK_SECRET)
   try {
     const body = await request.text()
     const signature = request.headers.get("stripe-signature")!
+    console.log("Signature exists:", !!signature)
 
     let event: Stripe.Event
 

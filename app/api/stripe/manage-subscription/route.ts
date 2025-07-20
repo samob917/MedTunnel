@@ -10,6 +10,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "User ID is required" }, { status: 400 })
     }
 
+    // Get URL dynamically from request headers
+    const host = request.headers.get('host')
+    const protocol = request.headers.get('x-forwarded-proto') || 'http'
+    const baseUrl = `${protocol}://${host}`
+
     // Get user's Stripe customer ID
     const { data: userData } = await supabase
       .from("users")
@@ -56,7 +61,7 @@ export async function POST(request: NextRequest) {
     // Create customer portal session for other management tasks
     const session = await stripe.billingPortal.sessions.create({
       customer: userData.stripe_customer_id,
-      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/`,
+      return_url: baseUrl,
     })
 
     return NextResponse.json({ url: session.url })

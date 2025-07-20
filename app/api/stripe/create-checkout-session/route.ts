@@ -10,6 +10,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "User ID and email are required" }, { status: 400 })
     }
 
+    // Get URL dynamically from request headers (works in all environments)
+    const host = request.headers.get('host')
+    const protocol = request.headers.get('x-forwarded-proto') || 'http'
+    const baseUrl = `${protocol}://${host}`
+
     // Get or create Stripe customer
     let customerId: string
 
@@ -32,7 +37,7 @@ export async function POST(request: NextRequest) {
       await supabase.from("users").update({ stripe_customer_id: customerId }).eq("id", userId)
     }
 
-    // Create checkout session
+    // Create checkout session with proper URLs
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
@@ -43,8 +48,8 @@ export async function POST(request: NextRequest) {
         },
       ],
       mode: "subscription",
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/?canceled=true`,
+      success_url: `${baseUrl}/?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/?canceled=true`,
       metadata: {
         user_id: userId,
       },

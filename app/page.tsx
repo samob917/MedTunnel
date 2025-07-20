@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from "@/components/auth-provider"
 import { AuthModal } from "@/components/auth-modal"
 import { SubscriptionManager } from "@/components/subscription-manager"
 import { LimitReachedModal } from "@/components/limit-reached-modal"
+// Remove this line if using a different toast library
 
 import {
   processFile,
@@ -55,19 +56,60 @@ function MedTunnelApp() {
   // Check if user is pro (mock some users as pro for demo)
   const isProUser = user?.subscription_tier === "pro" && user?.subscription_status === "active"
 
+  // Handle Stripe redirect parameters
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const success = urlParams.get('success')
+    const canceled = urlParams.get('canceled')
+    const sessionId = urlParams.get('session_id')
+    
+    if (success === 'true') {
+      // Using your toast library - adjust based on what you're using
+      // Example for react-toastify:
+      // toast.success('Payment successful! Your Pro subscription is now active.')
+      
+      // Example for react-hot-toast:
+      // toast.success('Payment successful! Your Pro subscription is now active.')
+      
+      console.log('Payment successful! Session ID:', sessionId)
+      
+      // Clean up URL
+      window.history.replaceState({}, '', '/')
+    }
+    
+    if (canceled === 'true') {
+      // Using your toast library
+      // toast.error('Payment canceled. You can try again anytime.')
+      
+      console.log('Payment canceled')
+      
+      // Clean up URL
+      window.history.replaceState({}, '', '/')
+    }
+  }, [])
+
   useEffect(() => {
     const testConnection = async () => {
       try {
-        const { data, error } = await supabase.from("users").select("count").limit(1)
-        if (error) {
-          setConnectionStatus(`Error: ${error.message}`)
-        } else {
+        // Since we know the connection works, let's make it simpler
+        setConnectionStatus("✅ Connected to Supabase")
+        
+        // Or if you want to actually test it:
+        const { error } = await supabase
+          .from("users")
+          .select("id")
+          .single() // This might work better than limit(1)
+        
+        if (!error) {
           setConnectionStatus("✅ Connected to Supabase")
+        } else {
+          setConnectionStatus(`Error: ${error.message}`)
         }
       } catch (err) {
         setConnectionStatus(`Connection failed: ${err}`)
       }
     }
+    
     testConnection()
   }, [])
 
@@ -110,6 +152,8 @@ function MedTunnelApp() {
       setActiveTab("tunnel")
     } catch (error) {
       console.error("File processing error:", error)
+      // Use your toast library here
+      // Example: toast.error('Error processing file. Please try again.')
     } finally {
       setIsProcessing(false)
     }
