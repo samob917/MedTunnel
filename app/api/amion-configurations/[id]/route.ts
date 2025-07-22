@@ -7,20 +7,70 @@ const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, proces
 
 const supabaseAuth = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
-/* ----------  PUT  ---------- */
-export async function PUT(request: NextRequest, { params }: any) {
+// Define the params type
+type RouteParams = {
+  params: Promise<{ id: string }>
+}
+
+/* ----------  GET  ---------- */
+export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const body = await request.json()
+    const { id } = await params
     const authHeader = request.headers.get("authorization")
 
-    if (!authHeader) return NextResponse.json({ error: "Authorization header required" }, { status: 401 })
+    if (!authHeader) {
+      return NextResponse.json({ error: "Authorization header required" }, { status: 401 })
+    }
 
     const token = authHeader.replace("Bearer ", "")
     const {
       data: { user },
       error: authError,
     } = await supabaseAuth.auth.getUser(token)
-    if (authError || !user) return NextResponse.json({ error: "Invalid authentication" }, { status: 401 })
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid authentication" }, { status: 401 })
+    }
+
+    // Get the configuration
+    const { data: configuration, error } = await supabaseAdmin
+      .from("amion_configurations")
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .single()
+
+    if (error || !configuration) {
+      return NextResponse.json({ error: "Configuration not found" }, { status: 404 })
+    }
+
+    return NextResponse.json({ configuration })
+  } catch (e) {
+    console.error("GET exception:", e)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
+
+/* ----------  PUT  ---------- */
+export async function PUT(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { id } = await params
+    const body = await request.json()
+    const authHeader = request.headers.get("authorization")
+
+    if (!authHeader) {
+      return NextResponse.json({ error: "Authorization header required" }, { status: 401 })
+    }
+
+    const token = authHeader.replace("Bearer ", "")
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAuth.auth.getUser(token)
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid authentication" }, { status: 401 })
+    }
 
     const { name, description, clinicMappings, residentMappings, mergedClinics, isDefault } = body
 
@@ -28,18 +78,23 @@ export async function PUT(request: NextRequest, { params }: any) {
     const { data: cfg, error: ownErr } = await supabaseAdmin
       .from("amion_configurations")
       .select("user_id")
-      .eq("id", params.id)
+      .eq("id", id)
       .single()
 
-    if (ownErr || !cfg) return NextResponse.json({ error: "Configuration not found" }, { status: 404 })
-    if (cfg.user_id !== user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    if (ownErr || !cfg) {
+      return NextResponse.json({ error: "Configuration not found" }, { status: 404 })
+    }
+
+    if (cfg.user_id !== user.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    }
 
     if (isDefault) {
       await supabaseAdmin
         .from("amion_configurations")
         .update({ is_default: false })
         .eq("user_id", user.id)
-        .neq("id", params.id)
+        .neq("id", id)
     }
 
     const { data, error } = await supabaseAdmin
@@ -51,8 +106,9 @@ export async function PUT(request: NextRequest, { params }: any) {
         resident_mappings: residentMappings,
         merged_clinics: mergedClinics,
         is_default: isDefault,
+        updated_at: new Date().toISOString(),
       })
-      .eq("id", params.id)
+      .eq("id", id)
       .select()
       .single()
 
@@ -69,30 +125,44 @@ export async function PUT(request: NextRequest, { params }: any) {
 }
 
 /* ----------  DELETE  ---------- */
-export async function DELETE(request: NextRequest, { params }: any) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
+    const { id } = await params
     const authHeader = request.headers.get("authorization")
-    if (!authHeader) return NextResponse.json({ error: "Authorization header required" }, { status: 401 })
+
+    if (!authHeader) {
+      return NextResponse.json({ error: "Authorization header required" }, { status: 401 })
+    }
 
     const token = authHeader.replace("Bearer ", "")
     const {
       data: { user },
       error: authError,
     } = await supabaseAuth.auth.getUser(token)
-    if (authError || !user) return NextResponse.json({ error: "Invalid authentication" }, { status: 401 })
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Invalid authentication" }, { status: 401 })
+    }
 
     const { data: cfg, error: ownErr } = await supabaseAdmin
       .from("amion_configurations")
       .select("user_id")
-      .eq("id", params.id)
+      .eq("id", id)
       .single()
 
-    if (ownErr || !cfg) return NextResponse.json({ error: "Configuration not found" }, { status: 404 })
-    if (cfg.user_id !== user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    if (ownErr || !cfg) {
+      return NextResponse.json({ error: "Configuration not found" }, { status: 404 })
+    }
 
-    const { error } = await supabaseAdmin.from("amion_configurations").delete().eq("id", params.id)
+    if (cfg.user_id !== user.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    }
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const { error } = await supabaseAdmin.from("amion_configurations").delete().eq("id", id)
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true })
   } catch (e) {
@@ -100,4 +170,3 @@ export async function DELETE(request: NextRequest, { params }: any) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
-
