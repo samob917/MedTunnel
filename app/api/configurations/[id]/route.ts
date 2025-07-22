@@ -2,12 +2,17 @@ import { type NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
 
 // GET - Get specific configuration
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
+    const { id } = await params
+    
     const { data: configuration, error } = await supabase
       .from("configurations")
       .select("*")
-      .eq("id", params.id)
+      .eq("id", id)
       .single()
 
     if (error) {
@@ -23,8 +28,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 }
 
 // PUT - Update configuration
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
+    const { id } = await params
     const body = await request.json()
     const { name, description, configData, isDefault, userId } = body
 
@@ -35,7 +44,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         .update({ is_default: false })
         .eq("user_id", userId)
         .eq("tunnel_id", "amion")
-        .neq("id", params.id)
+        .neq("id", id)
     }
 
     const { data: configuration, error } = await supabase
@@ -46,7 +55,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         config_data: configData,
         is_default: isDefault,
       })
-      .eq("id", params.id)
+      .eq("id", id)
       .select()
       .single()
 
@@ -63,9 +72,17 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 }
 
 // DELETE - Delete configuration
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    const { error } = await supabase.from("configurations").delete().eq("id", params.id)
+    const { id } = await params
+    
+    const { error } = await supabase
+      .from("configurations")
+      .delete()
+      .eq("id", id)
 
     if (error) {
       console.error("Error deleting configuration:", error)
