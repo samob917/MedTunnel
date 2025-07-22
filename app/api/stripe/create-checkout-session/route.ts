@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
 
     console.log("Base URL:", baseUrl)
 
-    // Get or create Stripe customer
+    // Get or create Stripe customer with environment mismatch handling
     let customerId: string
 
     try {
@@ -106,8 +106,49 @@ export async function POST(request: NextRequest) {
       console.log("User data:", userData)
 
       if (userData?.stripe_customer_id) {
-        customerId = userData.stripe_customer_id
-        console.log("Using existing customer:", customerId)
+        // Try to verify the customer exists in the current Stripe environment
+        try {
+          const existingCustomer = await stripe.customers.retrieve(userData.stripe_customer_id)
+          if (existingCustomer && !existingCustomer.deleted) {
+            customerId = userData.stripe_customer_id
+            console.log("Using existing customer:", customerId)
+          } else {
+            throw new Error("Customer not found or deleted")
+          }
+        } catch (stripeError: any) {
+          console.log("Existing customer not found in current environment:", stripeError.message)
+          console.log("Creating new customer for current environment...")
+
+          // Create new customer and update database
+          const customer = await stripe.customers.create({
+            email: userEmail,
+            metadata: {
+              supabase_user_id: userId,
+              migrated_from: userData.stripe_customer_id, // Keep track of old ID
+            },
+          })
+          customerId = customer.id
+          console.log("Created new customer:", customerId)
+
+          // Update user with new Stripe customer ID
+          const { error: updateError } = await supabaseAdmin
+            .from("users")
+            .update({
+              stripe_customer_id: customerId,
+              // Clear old subscription data since it's from test environment
+              stripe_subscription_id: null,
+              subscription_status: null,
+              subscription_tier: "free",
+            })
+            .eq("id", userId)
+
+          if (updateError) {
+            console.error("Failed to update user with new customer ID:", updateError)
+            // Continue anyway, we have the customer created
+          } else {
+            console.log("Updated user with new customer ID")
+          }
+        }
       } else {
         // Create new Stripe customer
         console.log("Creating new Stripe customer for:", userEmail)
