@@ -7,16 +7,9 @@ const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, proces
 
 const supabaseAuth = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
-interface RouteParams {
-  params: {
-    id: string
-  }
-}
-
 /* ----------  PUT  ---------- */
-export async function PUT(request: NextRequest, context: RouteParams) {
+export async function PUT(request: NextRequest, { params }: any) {
   try {
-    const { params } = context
     const body = await request.json()
     const authHeader = request.headers.get("authorization")
 
@@ -76,9 +69,8 @@ export async function PUT(request: NextRequest, context: RouteParams) {
 }
 
 /* ----------  DELETE  ---------- */
-export async function DELETE(request: NextRequest, context: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: any) {
   try {
-    const { params } = context
     const authHeader = request.headers.get("authorization")
     if (!authHeader) return NextResponse.json({ error: "Authorization header required" }, { status: 401 })
 
@@ -108,3 +100,4 @@ export async function DELETE(request: NextRequest, context: RouteParams) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
+
