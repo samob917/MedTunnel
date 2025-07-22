@@ -15,7 +15,6 @@ import { AuthProvider, useAuth } from "@/components/auth-provider"
 import { AuthModal } from "@/components/auth-modal"
 import { SubscriptionManager } from "@/components/subscription-manager"
 import { LimitReachedModal } from "@/components/limit-reached-modal"
-// Remove this line if using a different toast library
 
 import {
   processFile,
@@ -25,7 +24,6 @@ import {
   exportToExcelMultiSheet,
 } from "@/lib/file-processor"
 import { getTunnel, processTunnelData } from "@/lib/tunnel-processor"
-import { supabase } from "@/lib/supabase"
 
 function MedTunnelApp() {
   const { user, signOut, usageCount, canUseService, incrementUsage } = useAuth()
@@ -39,6 +37,7 @@ function MedTunnelApp() {
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
   const [showLimitModal, setShowLimitModal] = useState(false)
+  const [ambiguousShifts, setAmbiguousShifts] = useState<any[]>([])
 
   // State for enhanced configuration
   const [amionConfig, setAmionConfig] = useState<AmionConfiguration>({
@@ -59,57 +58,42 @@ function MedTunnelApp() {
   // Handle Stripe redirect parameters
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
-    const success = urlParams.get('success')
-    const canceled = urlParams.get('canceled')
-    const sessionId = urlParams.get('session_id')
-    
-    if (success === 'true') {
-      // Using your toast library - adjust based on what you're using
-      // Example for react-toastify:
-      // toast.success('Payment successful! Your Pro subscription is now active.')
-      
-      // Example for react-hot-toast:
-      // toast.success('Payment successful! Your Pro subscription is now active.')
-      
-      console.log('Payment successful! Session ID:', sessionId)
-      
-      // Clean up URL
-      window.history.replaceState({}, '', '/')
+    const success = urlParams.get("success")
+    const canceled = urlParams.get("canceled")
+    const sessionId = urlParams.get("session_id")
+
+    console.log("=== MAIN APP STRIPE REDIRECT CHECK ===")
+    console.log("URL params:", { success, canceled, sessionId })
+    console.log("Full URL:", window.location.href)
+
+    if (success === "true" && sessionId) {
+      console.log("✅ Payment successful detected! Session ID:", sessionId)
+
+      // Automatically check and update the session
+      checkStripeSession(sessionId)
+
+      // Clean up URL after a short delay
+      setTimeout(() => {
+        window.history.replaceState({}, "", "/")
+      }, 2000)
     }
-    
-    if (canceled === 'true') {
-      // Using your toast library
-      // toast.error('Payment canceled. You can try again anytime.')
-      
-      console.log('Payment canceled')
-      
+
+    if (canceled === "true") {
+      console.log("❌ Payment canceled")
       // Clean up URL
-      window.history.replaceState({}, '', '/')
+      window.history.replaceState({}, "", "/")
     }
   }, [])
 
   useEffect(() => {
     const testConnection = async () => {
       try {
-        // Since we know the connection works, let's make it simpler
         setConnectionStatus("✅ Connected to Supabase")
-        
-        // Or if you want to actually test it:
-        const { error } = await supabase
-          .from("users")
-          .select("id")
-          .single() // This might work better than limit(1)
-        
-        if (!error) {
-          setConnectionStatus("✅ Connected to Supabase")
-        } else {
-          setConnectionStatus(`Error: ${error.message}`)
-        }
       } catch (err) {
         setConnectionStatus(`Connection failed: ${err}`)
       }
     }
-    
+
     testConnection()
   }, [])
 
@@ -151,9 +135,7 @@ function MedTunnelApp() {
       await incrementUsage()
       setActiveTab("tunnel")
     } catch (error) {
-      console.error("File processing error:", error)
-      // Use your toast library here
-      // Example: toast.error('Error processing file. Please try again.')
+      console.error("Fileprocessing error:", error)
     } finally {
       setIsProcessing(false)
     }
@@ -189,10 +171,24 @@ function MedTunnelApp() {
       headersToProcess = [...headersToProcess, "_sheet_source"]
     }
 
-    const { processedData, errors } = processTunnelData(dataToProcess, headersToProcess, tunnel)
+    const {
+      processedData,
+      errors,
+      ambiguousShifts: detectedAmbiguousShifts,
+    } = processTunnelData(dataToProcess, headersToProcess, tunnel)
+
+    // Handle ambiguous shifts for Amion tunnel
+    if (tunnelId === "amion" && detectedAmbiguousShifts && detectedAmbiguousShifts.length > 0) {
+      setAmbiguousShifts(detectedAmbiguousShifts)
+      // IMPORTANT: Keep the multi-row residents in convertedData
+      setConvertedData(processedData) // This contains the multi-row residents
+      setConversionErrors(errors)
+      return
+    }
 
     setConvertedData(processedData)
     setConversionErrors(errors)
+    setAmbiguousShifts([]) // Clear any previous ambiguous shifts
 
     // Detect clinics and residents for Amion tunnel
     if (tunnelId === "amion") {
@@ -243,6 +239,57 @@ function MedTunnelApp() {
   const handleLimitModalUpgrade = () => {
     setShowLimitModal(false)
     setShowSubscriptionModal(true)
+  }
+
+  const handleResolveAmbiguousShifts = (resolvedShifts: any[]) => {
+    // Convert resolved shifts to the standard format
+    const resolvedAssignments = resolvedShifts.map((shift) => ({
+      resident: shift.resident,
+      displayName: shift.resident.includes(",") ? shift.resident.split(",")[0].trim() : shift.resident,
+      date: shift.date,
+      shift: shift.shift,
+      assignment: shift.assignment,
+      source: shift.source,
+      row: shift.row,
+      column: shift.column,
+    }))
+
+    // CRITICAL FIX: Combine resolved shifts with existing multi-row residents
+    const combinedData = [...convertedData, ...resolvedAssignments]
+
+    setConvertedData(combinedData)
+    setAmbiguousShifts([])
+
+    // Detect clinics and residents from combined data
+    if (selectedTunnel === "amion") {
+      detectClinicsAndResidents(combinedData)
+    }
+  }
+
+  const checkStripeSession = async (sessionId: string) => {
+    console.log("=== CHECKING STRIPE SESSION FROM MAIN APP ===")
+
+    try {
+      const response = await fetch("/api/stripe/check-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      })
+
+      console.log("Session check response status:", response.status)
+      const data = await response.json()
+      console.log("Session check response data:", data)
+
+      if (data.success) {
+        console.log("✅ Session successfully processed!")
+        // Show success message or update UI
+        setConnectionStatus("✅ Payment successful! Subscription activated.")
+      } else {
+        console.log("⚠️ Session not yet processed")
+      }
+    } catch (error) {
+      console.error("❌ Error checking session:", error)
+    }
   }
 
   return (
@@ -304,7 +351,10 @@ function MedTunnelApp() {
                 <Settings className="w-4 h-4 mr-2" />
                 Tunnel
               </TabsTrigger>
-              <TabsTrigger value="preview" disabled={!selectedTunnel || convertedData.length === 0}>
+              <TabsTrigger
+                value="preview"
+                disabled={!selectedTunnel || (convertedData.length === 0 && ambiguousShifts.length === 0)}
+              >
                 <Eye className="w-4 h-4 mr-2" />
                 Preview
               </TabsTrigger>
@@ -367,6 +417,8 @@ function MedTunnelApp() {
                       mergedClinics={amionConfig.mergedClinics}
                       errors={conversionErrors}
                       onConfigureClick={() => setShowMappingConfig(true)}
+                      ambiguousShifts={ambiguousShifts}
+                      onResolveAmbiguousShifts={handleResolveAmbiguousShifts}
                     />
                   ) : (
                     <DataPreview
@@ -455,3 +507,4 @@ export default function Page() {
     </AuthProvider>
   )
 }
+

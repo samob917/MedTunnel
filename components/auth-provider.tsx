@@ -117,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error
   }
 
+  
   const incrementUsage = async () => {
     if (user) {
       // For signed-in users, update database

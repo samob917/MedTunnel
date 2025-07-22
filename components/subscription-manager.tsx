@@ -1,13 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, Crown, CreditCard, X, Check } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Loader2, Crown, CreditCard, X, Check, AlertCircle } from "lucide-react"
 import { useAuth } from "./auth-provider"
 import { getStripe } from "@/lib/stripe"
-
 
 interface SubscriptionManagerProps {
   onClose?: () => void
@@ -17,15 +17,84 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
   const { user, usageCount, refreshUser } = useAuth()
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   const isProUser = user?.subscription_tier === "pro" && user?.subscription_status === "active"
   const isCanceling = user?.subscription_cancel_at_period_end
+
+  // Check for successful payment on component mount
+  useEffect(() => {
+    console.log("=== SUBSCRIPTION MANAGER MOUNTED ===")
+
+    const urlParams = new URLSearchParams(window.location.search)
+    const success = urlParams.get("success")
+    const sessionId = urlParams.get("session_id")
+
+    console.log("URL params:", {
+      success,
+      sessionId,
+      fullUrl: window.location.href,
+      search: window.location.search,
+    })
+
+    if (success === "true" && sessionId) {
+      console.log("✅ Payment success detected! Session ID:", sessionId)
+      checkAndUpdateSession(sessionId)
+    } else if (success === "true") {
+      console.log("⚠️ Success=true but no session_id found")
+    } else {
+      console.log("ℹ️ No payment success detected in URL")
+    }
+  }, [])
+
+  const checkAndUpdateSession = async (sessionId: string) => {
+    console.log("=== CHECKING SESSION START ===")
+    console.log("Session ID:", sessionId)
+
+    try {
+      setActionLoading("checking")
+      console.log("Making API call to /api/stripe/check-session...")
+
+      const response = await fetch("/api/stripe/check-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      })
+
+      console.log("API Response status:", response.status)
+      console.log("API Response ok:", response.ok)
+
+      const data = await response.json()
+      console.log("API Response data:", data)
+
+      if (data.success) {
+        console.log("✅ Session check successful!")
+        setSuccess("✅ Payment successful! Your subscription has been activated.")
+        await refreshUser()
+        console.log("✅ User data refreshed")
+      } else {
+        console.log("⚠️ Session not yet processed, refreshing user data anyway")
+        await refreshUser()
+      }
+    } catch (error) {
+      console.error("❌ Session check error:", error)
+    } finally {
+      setActionLoading(null)
+      console.log("=== CHECKING SESSION END ===")
+    }
+  }
 
   const handleUpgrade = async () => {
     if (!user) return
 
     setLoading(true)
+    setError(null)
+    setSuccess(null)
+
     try {
+      console.log("Starting checkout process for user:", user.id)
+
       const response = await fetch("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: {
@@ -37,23 +106,38 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
         }),
       })
 
+      console.log("Checkout response status:", response.status)
+
       if (!response.ok) {
-        throw new Error("Failed to create checkout session")
+        const errorData = await response.text()
+        console.error("Checkout session creation failed:", errorData)
+        throw new Error(`Failed to create checkout session: ${response.status}`)
       }
 
-      const { sessionId } = await response.json()
-      const stripe = await getStripe()
+      const data = await response.json()
+      console.log("Checkout session data:", data)
 
-      if (stripe) {
-        const { error } = await stripe.redirectToCheckout({ sessionId })
-        if (error) {
-          console.error("Stripe checkout error:", error)
-          alert("Failed to redirect to checkout. Please try again.")
-        }
+      if (!data.sessionId) {
+        throw new Error("No session ID returned from server")
+      }
+
+      const stripe = await getStripe()
+      if (!stripe) {
+        throw new Error("Failed to load Stripe")
+      }
+
+      console.log("Redirecting to Stripe checkout...")
+      const { error: stripeError } = await stripe.redirectToCheckout({
+        sessionId: data.sessionId,
+      })
+
+      if (stripeError) {
+        console.error("Stripe checkout error:", stripeError)
+        throw new Error(stripeError.message || "Stripe checkout failed")
       }
     } catch (error) {
       console.error("Error creating checkout session:", error)
-      alert("Failed to start checkout. Please try again.")
+      setError(error instanceof Error ? error.message : "Failed to start checkout")
     } finally {
       setLoading(false)
     }
@@ -63,6 +147,9 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
     if (!user) return
 
     setActionLoading(action)
+    setError(null)
+    setSuccess(null)
+
     try {
       const response = await fetch("/api/stripe/manage-subscription", {
         method: "POST",
@@ -76,7 +163,9 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
       })
 
       if (!response.ok) {
-        throw new Error("Failed to manage subscription")
+        const errorData = await response.text()
+        console.error("Subscription management failed:", errorData)
+        throw new Error(`Failed to ${action} subscription`)
       }
 
       const result = await response.json()
@@ -86,25 +175,34 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
       } else {
         // Refresh user data to get updated subscription status
         await refreshUser()
+        setSuccess(`✅ Subscription ${action}ed successfully!`)
       }
     } catch (error) {
       console.error("Error managing subscription:", error)
-      alert("Failed to manage subscription. Please try again.")
+      setError(error instanceof Error ? error.message : `Failed to ${action} subscription`)
     } finally {
       setActionLoading(null)
     }
   }
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    })
-  }
-
   return (
     <div className="space-y-6">
+      {/* Success Alert */}
+      {success && (
+        <Alert>
+          <Check className="h-4 w-4" />
+          <AlertDescription>{success}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Error Alert */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Current Plan */}
       <Card>
         <CardHeader>
@@ -119,12 +217,15 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
                 ) : (
                   "MedTunnel Free"
                 )}
+                {actionLoading === "checking" && <Loader2 className="w-4 h-4 animate-spin" />}
               </CardTitle>
               <CardDescription>
                 {isProUser ? "Unlimited conversions and premium features" : "Limited to 5 conversions"}
               </CardDescription>
             </div>
-            <Badge variant={isProUser ? "default" : "secondary"}>{isProUser ? "Pro" : "Free"}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant={isProUser ? "default" : "secondary"}>{isProUser ? "Pro" : "Free"}</Badge>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -137,17 +238,12 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
               </span>
             </div>
 
-            {/* Subscription Details */}
-            {isProUser && user?.subscription_current_period_end && (
+            {/* Subscription Details - REMOVED period end display */}
+            {isProUser && (
               <div className="space-y-2 text-sm text-gray-600">
                 <p>
-                  <strong>Next billing date:</strong> {formatDate(user.subscription_current_period_end)}
+                  <strong>Status:</strong> {isCanceling ? "Will cancel at next billing cycle" : "Active subscription"}
                 </p>
-                {isCanceling && (
-                  <p className="text-amber-600">
-                    <strong>Status:</strong> Will cancel on {formatDate(user.subscription_current_period_end)}
-                  </p>
-                )}
               </div>
             )}
 

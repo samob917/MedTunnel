@@ -1,21 +1,21 @@
+"use client"
+
 import { useState, useEffect } from "react"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ConfigurationManager } from "./configuration-manager"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Building2, Users, Save, Upload, Trash2, Plus, X } from "lucide-react"
-import { supabase } from "@/lib/supabase"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Trash2, Plus, Users, Building, Check } from "lucide-react"
 
 export interface AmionConfiguration {
-  id?: string
   name: string
-  clinicMappings: Record<string, string>  // Original clinic -> Output sheet name
-  residentMappings: Record<string, string> // Original resident -> Display name
-  mergedClinics: Record<string, string[]>  // Output sheet -> [Original clinics]
+  clinicMappings: Record<string, string>
+  residentMappings: Record<string, string>
+  mergedClinics: Record<string, string[]>
 }
 
 interface ClinicConfigurationDialogProps {
@@ -24,7 +24,7 @@ interface ClinicConfigurationDialogProps {
   detectedClinics: string[]
   detectedResidents: string[]
   onSave: (config: AmionConfiguration) => void
-  currentConfig?: AmionConfiguration
+  currentConfig: AmionConfiguration
   userEmail?: string
 }
 
@@ -35,368 +35,263 @@ export function ClinicConfigurationDialog({
   detectedResidents,
   onSave,
   currentConfig,
-  userEmail
+  userEmail,
 }: ClinicConfigurationDialogProps) {
-  const [activeTab, setActiveTab] = useState("clinics")
-  const [configName, setConfigName] = useState(currentConfig?.name || "")
-  const [clinicMappings, setClinicMappings] = useState<Record<string, string>>(currentConfig?.clinicMappings || {})
-  const [residentMappings, setResidentMappings] = useState<Record<string, string>>(currentConfig?.residentMappings || {})
-  const [mergedClinics, setMergedClinics] = useState<Record<string, string[]>>(currentConfig?.mergedClinics || {})
-  const [savedConfigs, setSavedConfigs] = useState<AmionConfiguration[]>([])
-  const [selectedConfigId, setSelectedConfigId] = useState<string>("")
-  
-  // New merge UI state
-  const [newMergeName, setNewMergeName] = useState("")
+  const [config, setConfig] = useState<AmionConfiguration>(currentConfig)
+  const [newClinicName, setNewClinicName] = useState("")
   const [selectedClinicsForMerge, setSelectedClinicsForMerge] = useState<string[]>([])
+  const [mergeGroupName, setMergeGroupName] = useState("")
 
+  // Update local config when currentConfig changes
   useEffect(() => {
-    if (userEmail) {
-      loadSavedConfigs()
-    }
-  }, [userEmail])
+    setConfig(currentConfig)
+  }, [currentConfig])
 
-  const loadSavedConfigs = async () => {
-    if (!userEmail) return
-    
-    const { data, error } = await supabase
-      .from('amion_configurations')
-      .select('*')
-      .eq('user_email', userEmail)
-      .order('created_at', { ascending: false })
-    
-    if (data) {
-      setSavedConfigs(data)
-    }
+  const handleClinicMappingChange = (originalName: string, displayName: string) => {
+    console.log("Clinic mapping changed:", originalName, "->", displayName)
+    setConfig((prev) => ({
+      ...prev,
+      clinicMappings: {
+        ...prev.clinicMappings,
+        [originalName]: displayName,
+      },
+    }))
   }
 
-  const handleSaveConfiguration = async () => {
-    const config: AmionConfiguration = {
-      name: configName || `Configuration ${new Date().toLocaleDateString()}`,
-      clinicMappings,
-      residentMappings,
-      mergedClinics
-    }
-    
-    if (userEmail && configName) {
-      // Save to database
-      const { data, error } = await supabase
-        .from('amion_configurations')
-        .upsert({
-          id: currentConfig?.id,
-          user_email: userEmail,
-          name: configName,
-          clinic_mappings: clinicMappings,
-          resident_mappings: residentMappings,
-          merged_clinics: mergedClinics,
-          updated_at: new Date().toISOString()
-        })
-        .select()
-        .single()
-      
-      if (data) {
-        config.id = data.id
-        await loadSavedConfigs()
+  const handleResidentMappingChange = (originalName: string, displayName: string) => {
+    setConfig((prev) => ({
+      ...prev,
+      residentMappings: {
+        ...prev.residentMappings,
+        [originalName]: displayName,
+      },
+    }))
+  }
+
+  const handleMergeClinic = () => {
+    if (!mergeGroupName.trim() || selectedClinicsForMerge.length < 2) return
+
+    setConfig((prev) => ({
+      ...prev,
+      mergedClinics: {
+        ...prev.mergedClinics,
+        [mergeGroupName.trim()]: selectedClinicsForMerge,
+      },
+    }))
+
+    setMergeGroupName("")
+    setSelectedClinicsForMerge([])
+  }
+
+  const handleRemoveMergeGroup = (groupName: string) => {
+    setConfig((prev) => {
+      const newMergedClinics = { ...prev.mergedClinics }
+      delete newMergedClinics[groupName]
+      return {
+        ...prev,
+        mergedClinics: newMergedClinics,
       }
-    }
-    
+    })
+  }
+
+  const handleApplyChanges = () => {
+    console.log("Apply changes clicked, current config:", config)
     onSave(config)
     onOpenChange(false)
   }
 
-  const handleLoadConfiguration = async (configId: string) => {
-    const config = savedConfigs.find(c => c.id === configId)
-    if (config) {
-      setConfigName(config.name)
-      setClinicMappings(config.clinicMappings || {})
-      setResidentMappings(config.residentMappings || {})
-      setMergedClinics(config.mergedClinics || {})
-      setSelectedConfigId(configId)
-    }
+  const handleConfigurationLoad = (loadedConfig: AmionConfiguration) => {
+    setConfig(loadedConfig)
   }
-
-  const handleDeleteConfiguration = async (configId: string) => {
-    await supabase
-      .from('amion_configurations')
-      .delete()
-      .eq('id', configId)
-    
-    await loadSavedConfigs()
-    if (selectedConfigId === configId) {
-      setSelectedConfigId("")
-    }
-  }
-
-  const handleCreateMerge = () => {
-    if (newMergeName && selectedClinicsForMerge.length > 0) {
-      setMergedClinics({
-        ...mergedClinics,
-        [newMergeName]: selectedClinicsForMerge
-      })
-      
-      // Update clinic mappings for merged clinics
-      const updatedMappings = { ...clinicMappings }
-      selectedClinicsForMerge.forEach(clinic => {
-        updatedMappings[clinic] = newMergeName
-      })
-      setClinicMappings(updatedMappings)
-      
-      // Reset merge UI
-      setNewMergeName("")
-      setSelectedClinicsForMerge([])
-    }
-  }
-
-  const handleRemoveMerge = (mergeName: string) => {
-    const { [mergeName]: removed, ...rest } = mergedClinics
-    setMergedClinics(rest)
-    
-    // Reset clinic mappings for unmerged clinics
-    const updatedMappings = { ...clinicMappings }
-    removed?.forEach(clinic => {
-      delete updatedMappings[clinic]
-    })
-    setClinicMappings(updatedMappings)
-  }
-
-  // Get unique residents from the detected list
-  const uniqueResidents = Array.from(new Set(detectedResidents)).sort()
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Configure Amion Export</DialogTitle>
+          <DialogTitle>Configure Clinic & Resident Names</DialogTitle>
           <DialogDescription>
-            Customize clinic and resident names, merge clinics, and save configurations for future use.
+            Customize how clinic and resident names appear in your exported files, and save configurations for future
+            use.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Configuration Name and Load/Save */}
-        <div className="space-y-4 border-b pb-4">
-          <div className="flex gap-2">
-            <Input
-              placeholder="Configuration name"
-              value={configName}
-              onChange={(e) => setConfigName(e.target.value)}
-              className="flex-1"
-            />
-            {userEmail && (
-              <>
-                <Select value={selectedConfigId} onValueChange={handleLoadConfiguration}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Load saved config" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {savedConfigs.map(config => (
-                      <SelectItem key={config.id} value={config.id!}>
-                        <div className="flex items-center justify-between w-full">
-                          <span>{config.name}</span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDeleteConfiguration(config.id!)
-                            }}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </>
-            )}
-          </div>
-        </div>
-
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 overflow-hidden flex flex-col">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="clinics" className="flex items-center gap-2">
-              <Building2 className="w-4 h-4" />
+        <Tabs defaultValue="clinics" className="w-full">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="clinics">
+              <Building className="w-4 h-4 mr-2" />
               Clinics
             </TabsTrigger>
-            <TabsTrigger value="merge" className="flex items-center gap-2">
-              <Plus className="w-4 h-4" />
-              Merge Clinics
-            </TabsTrigger>
-            <TabsTrigger value="residents" className="flex items-center gap-2">
-              <Users className="w-4 h-4" />
+            <TabsTrigger value="residents">
+              <Users className="w-4 h-4 mr-2" />
               Residents
             </TabsTrigger>
+            <TabsTrigger value="merge">Merge Clinics</TabsTrigger>
+            <TabsTrigger value="saved">Saved Configs</TabsTrigger>
           </TabsList>
 
-          <div className="flex-1 overflow-y-auto">
-            {/* Clinics Tab */}
-            <TabsContent value="clinics" className="space-y-4 p-4">
-              <div className="grid grid-cols-2 gap-4">
+          <TabsContent value="clinics" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Clinic Name Mappings</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
                 {detectedClinics.map((clinic) => (
-                  <div key={clinic} className="flex items-center gap-2">
-                    <Label className="w-1/2 text-sm truncate" title={clinic}>
-                      {clinic}
-                    </Label>
-                    <Input
-                      type="text"
-                      placeholder={clinic}
-                      value={clinicMappings[clinic] || ""}
-                      onChange={(e) => {
-                        setClinicMappings({
-                          ...clinicMappings,
-                          [clinic]: e.target.value
-                        })
-                      }}
-                      className="w-1/2"
-                      disabled={Object.values(mergedClinics).some(clinics => clinics.includes(clinic))}
-                    />
+                  <div key={clinic} className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <label className="text-sm font-medium text-gray-700">{clinic}</label>
+                    </div>
+                    <div className="flex-1">
+                      <Input
+                        value={config.clinicMappings[clinic] || clinic}
+                        onChange={(e) => handleClinicMappingChange(clinic, e.target.value)}
+                        placeholder="Display name"
+                      />
+                    </div>
                   </div>
                 ))}
-              </div>
-            </TabsContent>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-            {/* Merge Clinics Tab */}
-            <TabsContent value="merge" className="space-y-4 p-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Create New Merge</CardTitle>
-                  <CardDescription>
-                    Combine multiple clinics into a single sheet
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
+          <TabsContent value="residents" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Resident Name Mappings</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 max-h-96 overflow-y-auto">
+                {detectedResidents.map((resident) => (
+                  <div key={resident} className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <label className="text-sm font-medium text-gray-700">{resident}</label>
+                    </div>
+                    <div className="flex-1">
+                      <Input
+                        value={config.residentMappings[resident] || resident}
+                        onChange={(e) => handleResidentMappingChange(resident, e.target.value)}
+                        placeholder="Display name"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="merge" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Merge Clinics</CardTitle>
+                <p className="text-sm text-gray-600">Combine multiple clinics into a single Excel sheet</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
                   <Input
-                    placeholder="Merged sheet name"
-                    value={newMergeName}
-                    onChange={(e) => setNewMergeName(e.target.value)}
+                    value={mergeGroupName}
+                    onChange={(e) => setMergeGroupName(e.target.value)}
+                    placeholder="Merged group name (e.g., 'Combined Surgery')"
                   />
-                  <div className="flex flex-wrap gap-2">
-                    {detectedClinics
-                      .filter(clinic => !Object.values(mergedClinics).flat().includes(clinic))
-                      .map(clinic => (
-                        <Badge
-                          key={clinic}
-                          variant={selectedClinicsForMerge.includes(clinic) ? "default" : "outline"}
-                          className="cursor-pointer"
-                          onClick={() => {
-                            if (selectedClinicsForMerge.includes(clinic)) {
-                              setSelectedClinicsForMerge(selectedClinicsForMerge.filter(c => c !== clinic))
-                            } else {
-                              setSelectedClinicsForMerge([...selectedClinicsForMerge, clinic])
-                            }
-                          }}
-                        >
+                  <Select
+                    value=""
+                    onValueChange={(clinic) => {
+                      if (!selectedClinicsForMerge.includes(clinic)) {
+                        setSelectedClinicsForMerge([...selectedClinicsForMerge, clinic])
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select clinics to merge" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {detectedClinics
+                        .filter((clinic) => !selectedClinicsForMerge.includes(clinic))
+                        .map((clinic) => (
+                          <SelectItem key={clinic} value={clinic}>
+                            {clinic}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+
+                  {selectedClinicsForMerge.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedClinicsForMerge.map((clinic) => (
+                        <Badge key={clinic} variant="secondary" className="flex items-center gap-1">
                           {clinic}
+                          <button
+                            onClick={() =>
+                              setSelectedClinicsForMerge(selectedClinicsForMerge.filter((c) => c !== clinic))
+                            }
+                            className="ml-1 hover:text-red-600"
+                          >
+                            ×
+                          </button>
                         </Badge>
                       ))}
-                  </div>
-                  <Button 
-                    onClick={handleCreateMerge}
-                    disabled={!newMergeName || selectedClinicsForMerge.length === 0}
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={handleMergeClinic}
+                    disabled={!mergeGroupName.trim() || selectedClinicsForMerge.length < 2}
                     className="w-full"
                   >
-                    Create Merge
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Merge Group
                   </Button>
-                </CardContent>
-              </Card>
+                </div>
 
-              {/* Existing Merges */}
-              <div className="space-y-2">
-                {Object.entries(mergedClinics).map(([mergeName, clinics]) => (
-                  <Card key={mergeName}>
-                    <CardHeader className="py-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm">{mergeName}</CardTitle>
+                {Object.keys(config.mergedClinics).length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-medium">Current Merge Groups:</h4>
+                    {Object.entries(config.mergedClinics).map(([groupName, clinics]) => (
+                      <div key={groupName} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div>
+                          <span className="font-medium">{groupName}</span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {clinics.map((clinic) => (
+                              <Badge key={clinic} variant="outline" className="text-xs">
+                                {clinic}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => handleRemoveMerge(mergeName)}
+                          onClick={() => handleRemoveMergeGroup(groupName)}
+                          className="text-red-600 hover:text-red-700"
                         >
-                          <X className="w-4 h-4" />
+                          <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
-                    </CardHeader>
-                    <CardContent className="py-2">
-                      <div className="flex flex-wrap gap-1">
-                        {clinics.map(clinic => (
-                          <Badge key={clinic} variant="secondary" className="text-xs">
-                            {clinic}
-                          </Badge>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </TabsContent>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-            {/* Residents Tab */}
-            <TabsContent value="residents" className="space-y-4 p-4">
-              <div className="grid grid-cols-2 gap-4">
-                {uniqueResidents.map((resident) => {
-                  let displayName = resident
-                  
-                  // Create a map of last names to full names (similar to addDisplayNames logic)
-                  const lastNameMap: Record<string, string[]> = {}
-                  uniqueResidents.forEach(r => {
-                    if (r.includes(",")) {
-                      const lastName = r.split(",")[0].trim()
-                      if (!lastNameMap[lastName]) {
-                        lastNameMap[lastName] = []
-                      }
-                      lastNameMap[lastName].push(r)
-                    }
-                  })
-                  
-                  // Determine display name based on duplicates
-                  if (resident.includes(",")) {
-                    const parts = resident.split(",")
-                    const lastName = parts[0].trim()
-                    const firstName = parts[1] ? parts[1].trim() : ""
-                    
-                    // Check if there are multiple people with this last name
-                    if (lastNameMap[lastName] && lastNameMap[lastName].length > 1) {
-                      // Multiple people with same last name - add first initial
-                      displayName = firstName ? `${lastName}-${firstName.charAt(0).toUpperCase()}` : lastName
-                    } else {
-                      // Only one person with this last name
-                      displayName = lastName
-                    }
-                  }
-                  
-                  return (
-                    <div key={resident} className="flex items-center gap-2">
-                      <Label className="w-1/2 text-sm truncate" title={resident}>
-                        {displayName}
-                      </Label>
-                      <Input
-                        type="text"
-                        placeholder={displayName}
-                        value={residentMappings[resident] || ""}
-                        onChange={(e) => {
-                          setResidentMappings({
-                            ...residentMappings,
-                            [resident]: e.target.value
-                          })
-                        }}
-                        className="w-1/2"
-                      />
-                    </div>
-                  )
-                })}
-              </div>
-            </TabsContent>
-          </div>
+          <TabsContent value="saved" className="space-y-4">
+            <ConfigurationManager
+              currentConfig={config}
+              onConfigurationLoad={handleConfigurationLoad}
+              onConfigurationSave={(savedConfig) => {
+                // Configuration was saved successfully
+                console.log("Configuration saved:", savedConfig)
+              }}
+            />
+          </TabsContent>
         </Tabs>
 
-        <DialogFooter className="border-t pt-4">
+        <div className="flex justify-end gap-2 pt-4 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSaveConfiguration} className="flex items-center gap-2">
-            <Save className="w-4 h-4" />
-            Save & Apply
+          <Button onClick={handleApplyChanges} className="flex items-center gap-2">
+            <Check className="w-4 h-4" />
+            Apply Changes
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   )

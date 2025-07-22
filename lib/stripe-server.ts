@@ -1,19 +1,28 @@
-
-// lib/stripe-server.ts - Server-only version (import ONLY in API routes)
 import Stripe from "stripe"
 
-// This file should ONLY be imported in server-side code (API routes)
-if (!process.env.STRIPE_SECRET_KEY) {
-  console.error("STRIPE_SECRET_KEY is not set in environment variables")
-  throw new Error("STRIPE_SECRET_KEY is required for Stripe initialization")
+// Validate environment variables
+const requiredEnvVars = {
+  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+  STRIPE_PRO_PRICE_ID: process.env.STRIPE_PRO_PRICE_ID,
+}
+
+// Check for missing environment variables
+const missingVars = Object.entries(requiredEnvVars)
+  .filter(([key, value]) => !value)
+  .map(([key]) => key)
+
+if (missingVars.length > 0) {
+  console.error("Missing required Stripe environment variables:", missingVars)
+  throw new Error(`Missing required environment variables: ${missingVars.join(", ")}`)
 }
 
 // Server-side Stripe instance
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-06-30.basil",
+  typescript: true,
 })
 
-// Server configuration with price ID (includes secret data)
+// Server configuration with price ID
 export const STRIPE_CONFIG = {
   products: {
     pro: {
@@ -25,5 +34,4 @@ export const STRIPE_CONFIG = {
   },
 }
 
-// Re-export the stripe instance for backward compatibility
 export default stripe

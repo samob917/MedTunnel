@@ -1,6 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { stripe } from "@/lib/stripe-server"
-import { supabase } from "@/lib/supabase"
+import { createClient } from "@supabase/supabase-js"
+
+// Use service role for database operations
+const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+  },
+})
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,12 +19,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Get URL dynamically from request headers
-    const host = request.headers.get('host')
-    const protocol = request.headers.get('x-forwarded-proto') || 'http'
+    const host = request.headers.get("host")
+    const protocol = request.headers.get("x-forwarded-proto") || (host?.includes("localhost") ? "http" : "https")
     const baseUrl = `${protocol}://${host}`
 
-    // Get user's Stripe customer ID
-    const { data: userData } = await supabase
+    // Get user's Stripe customer ID using service role
+    const { data: userData } = await supabaseAdmin
       .from("users")
       .select("stripe_customer_id, stripe_subscription_id")
       .eq("id", userId)
@@ -36,8 +44,8 @@ export async function POST(request: NextRequest) {
         cancel_at_period_end: true,
       })
 
-      // Update database
-      await supabase.from("users").update({ subscription_cancel_at_period_end: true }).eq("id", userId)
+      // Update database using service role
+      await supabaseAdmin.from("users").update({ subscription_cancel_at_period_end: true }).eq("id", userId)
 
       return NextResponse.json({ success: true, message: "Subscription will cancel at period end" })
     }
@@ -52,8 +60,8 @@ export async function POST(request: NextRequest) {
         cancel_at_period_end: false,
       })
 
-      // Update database
-      await supabase.from("users").update({ subscription_cancel_at_period_end: false }).eq("id", userId)
+      // Update database using service role
+      await supabaseAdmin.from("users").update({ subscription_cancel_at_period_end: false }).eq("id", userId)
 
       return NextResponse.json({ success: true, message: "Subscription reactivated" })
     }
@@ -70,3 +78,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Failed to manage subscription" }, { status: 500 })
   }
 }
+
