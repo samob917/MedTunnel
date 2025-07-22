@@ -7,13 +7,11 @@ const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, proces
 
 const supabaseAuth = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
 
-// Define the params type
-type RouteParams = {
-  params: Promise<{ id: string }>
-}
-
 /* ----------  GET  ---------- */
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const { id } = await params
     const authHeader = request.headers.get("authorization")
@@ -52,7 +50,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 }
 
 /* ----------  PUT  ---------- */
-export async function PUT(request: NextRequest, { params }: RouteParams) {
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const { id } = await params
     const body = await request.json()
@@ -125,7 +126,10 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 }
 
 /* ----------  DELETE  ---------- */
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const { id } = await params
     const authHeader = request.headers.get("authorization")
