@@ -320,46 +320,54 @@ function MedTunnelApp() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
-        <div className="flex justify-between items-center mb-8">
-          <div className="text-center flex-1">
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">MedTunnel</h1>
-            <div className="text-sm text-gray-500 mt-2">Status: {connectionStatus}</div>
-            <p className="text-lg text-gray-600">Transform your data with intelligent conversion tunnels</p>
-          </div>
+        <div className="mb-8">
+          {/* Use CSS Grid for proper 3-column layout */}
+          <div className="grid grid-cols-3 items-center gap-4">
+            {/* Left spacer */}
+            <div></div>
 
-          <div className="flex items-center gap-4">
-            {user ? (
-              <>
-                <div className="text-right">
-                  <p className="text-sm text-gray-600 flex items-center gap-1">
-                    {user.email}
-                    {isProUser && <Crown className="w-4 h-4 text-yellow-500" />}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {isProUser ? "Unlimited conversions" : `${usageCount} / 5 conversions`}
-                  </p>
+            {/* Center content - always centered */}
+            <div className="text-center">
+              <h1 className="text-4xl font-bold text-gray-900 mb-2">MedTunnel</h1>
+              <div className="text-sm text-gray-500 mt-2">Status: {connectionStatus}</div>
+              <p className="text-lg text-gray-600">Transform your data with intelligent conversion tunnels</p>
+            </div>
+
+            {/* Right content - user info */}
+            <div className="flex items-center justify-end gap-4">
+              {user ? (
+                <>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-600 flex items-center gap-1 justify-end">
+                      {user.email}
+                      {isProUser && <Crown className="w-4 h-4 text-yellow-500" />}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {isProUser ? "Unlimited conversions" : `${usageCount} / 5 conversions`}
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setShowSubscriptionModal(true)}>
+                    <CreditCard className="w-4 h-4 mr-2" />
+                    {isProUser ? "Manage" : "Upgrade"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={signOut}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign Out
+                  </Button>
+                </>
+              ) : (
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <p className="text-sm text-gray-600">Anonymous User</p>
+                    <p className="text-xs text-gray-500">{usageCount} / 3 conversions</p>
+                  </div>
+                  <Button onClick={() => setShowAuthModal(true)}>
+                    <User className="w-4 h-4 mr-2" />
+                    Sign In
+                  </Button>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => setShowSubscriptionModal(true)}>
-                  <CreditCard className="w-4 h-4 mr-2" />
-                  {isProUser ? "Manage" : "Upgrade"}
-                </Button>
-                <Button variant="outline" size="sm" onClick={signOut}>
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Sign Out
-                </Button>
-              </>
-            ) : (
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <p className="text-sm text-gray-600">Anonymous User</p>
-                  <p className="text-xs text-gray-500">{usageCount} / 3 conversions</p>
-                </div>
-                <Button onClick={() => setShowAuthModal(true)}>
-                  <User className="w-4 h-4 mr-2" />
-                  Sign In
-                </Button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
@@ -483,10 +491,17 @@ function MedTunnelApp() {
           </Tabs>
         </div>
 
-        <div className="text-center mt-12 p-6 bg-white rounded-lg shadow-sm">
-          <p className="text-gray-600">
-            Want new tunnels? Contact us for custom conversions and personalized preferences.
-          </p>
+        {/* Contact Banner - Larger than upload box */}
+        <div className="max-w-5xl mx-auto mt-12">
+          <div className="p-6 bg-white rounded-lg shadow-sm border-2 border-dashed border-gray-200">
+            <p className="text-center text-gray-600">
+              Want new tunnels? Contact us at{" "}
+              <a href="mailto:zacdermody@schedulingwiz.com" className="text-blue-600 hover:text-blue-800 underline">
+                zacdermody@schedulingwiz.com
+              </a>{" "}
+              for custom conversions and personalized preferences.
+            </p>
+          </div>
         </div>
       </div>
 
