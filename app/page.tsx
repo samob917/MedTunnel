@@ -26,7 +26,7 @@ import {
 import { getTunnel, processTunnelData } from "@/lib/tunnel-processor"
 
 function MedTunnelApp() {
-  const { user, signOut, usageCount, canUseService, incrementUsage } = useAuth()
+  const { user, signOut, usageCount, canUseService, incrementUsage, refreshUser } = useAuth()
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [selectedTunnel, setSelectedTunnel] = useState<string>("")
   const [parsedData, setParsedData] = useState<ProcessedData | null>(null)
@@ -52,10 +52,10 @@ function MedTunnelApp() {
 
   const [connectionStatus, setConnectionStatus] = useState<string>("Checking...")
 
-  // Check if user is pro (mock some users as pro for demo)
+  // Check if user is pro
   const isProUser = user?.subscription_tier === "pro" && user?.subscription_status === "active"
 
-  // Handle Stripe redirect parameters
+  // Enhanced Stripe redirect handling with user refresh
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
     const success = urlParams.get("success")
@@ -64,26 +64,29 @@ function MedTunnelApp() {
 
     console.log("=== MAIN APP STRIPE REDIRECT CHECK ===")
     console.log("URL params:", { success, canceled, sessionId })
-    console.log("Full URL:", window.location.href)
+    console.log("Current user status:", {
+      email: user?.email,
+      tier: user?.subscription_tier,
+      status: user?.subscription_status,
+    })
 
     if (success === "true" && sessionId) {
       console.log("✅ Payment successful detected! Session ID:", sessionId)
 
-      // Automatically check and update the session
-      checkStripeSession(sessionId)
+      // Check session and refresh user data
+      checkStripeSessionAndRefresh(sessionId)
 
-      // Clean up URL after a short delay
+      // Clean up URL after processing
       setTimeout(() => {
         window.history.replaceState({}, "", "/")
-      }, 2000)
+      }, 3000)
     }
 
     if (canceled === "true") {
       console.log("❌ Payment canceled")
-      // Clean up URL
       window.history.replaceState({}, "", "/")
     }
-  }, [])
+  }, [user?.email]) // Add user email as dependency to re-run when user changes
 
   useEffect(() => {
     const testConnection = async () => {
@@ -135,7 +138,7 @@ function MedTunnelApp() {
       await incrementUsage()
       setActiveTab("tunnel")
     } catch (error) {
-      console.error("Fileprocessing error:", error)
+      console.error("File processing error:", error)
     } finally {
       setIsProcessing(false)
     }
@@ -180,15 +183,14 @@ function MedTunnelApp() {
     // Handle ambiguous shifts for Amion tunnel
     if (tunnelId === "amion" && detectedAmbiguousShifts && detectedAmbiguousShifts.length > 0) {
       setAmbiguousShifts(detectedAmbiguousShifts)
-      // IMPORTANT: Keep the multi-row residents in convertedData
-      setConvertedData(processedData) // This contains the multi-row residents
+      setConvertedData(processedData)
       setConversionErrors(errors)
       return
     }
 
     setConvertedData(processedData)
     setConversionErrors(errors)
-    setAmbiguousShifts([]) // Clear any previous ambiguous shifts
+    setAmbiguousShifts([])
 
     // Detect clinics and residents for Amion tunnel
     if (tunnelId === "amion") {
@@ -254,7 +256,7 @@ function MedTunnelApp() {
       column: shift.column,
     }))
 
-    // CRITICAL FIX: Combine resolved shifts with existing multi-row residents
+    // Combine resolved shifts with existing multi-row residents
     const combinedData = [...convertedData, ...resolvedAssignments]
 
     setConvertedData(combinedData)
@@ -266,10 +268,12 @@ function MedTunnelApp() {
     }
   }
 
-  const checkStripeSession = async (sessionId: string) => {
-    console.log("=== CHECKING STRIPE SESSION FROM MAIN APP ===")
+  // Enhanced session check with multiple refresh attempts
+  const checkStripeSessionAndRefresh = async (sessionId: string) => {
+    console.log("=== CHECKING STRIPE SESSION AND REFRESHING USER ===")
 
     try {
+      // First, check the session
       const response = await fetch("/api/stripe/check-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -282,13 +286,33 @@ function MedTunnelApp() {
 
       if (data.success) {
         console.log("✅ Session successfully processed!")
-        // Show success message or update UI
-        setConnectionStatus("✅ Payment successful! Subscription activated.")
+        setConnectionStatus("✅ Payment successful! Refreshing subscription...")
+
+        // Refresh user data multiple times to ensure it's updated
+        console.log("🔄 Refreshing user data (attempt 1)...")
+        await refreshUser()
+
+        // Wait a bit and refresh again to ensure database has been updated
+        setTimeout(async () => {
+          console.log("🔄 Refreshing user data (attempt 2)...")
+          await refreshUser()
+        }, 2000)
+
+        // One more refresh after a longer delay
+        setTimeout(async () => {
+          console.log("🔄 Refreshing user data (attempt 3)...")
+          await refreshUser()
+          setConnectionStatus("✅ Subscription activated!")
+        }, 5000)
       } else {
-        console.log("⚠️ Session not yet processed")
+        console.log("⚠️ Session not yet processed, but refreshing user data anyway")
+        await refreshUser()
+        setConnectionStatus("⚠️ Payment processing, please wait...")
       }
     } catch (error) {
       console.error("❌ Error checking session:", error)
+      // Still try to refresh user data
+      await refreshUser()
     }
   }
 
@@ -507,4 +531,3 @@ export default function Page() {
     </AuthProvider>
   )
 }
-

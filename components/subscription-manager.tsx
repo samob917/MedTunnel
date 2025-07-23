@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, Crown, CreditCard, X, Check, AlertCircle } from "lucide-react"
+import { Loader2, Crown, CreditCard, X, Check, AlertCircle, ExternalLink } from "lucide-react"
 import { useAuth } from "./auth-provider"
 import { getStripe } from "@/lib/stripe"
+import { supabase } from "@/lib/supabase"
 
 interface SubscriptionManagerProps {
   onClose?: () => void
@@ -151,37 +152,144 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
     setSuccess(null)
 
     try {
-      const response = await fetch("/api/stripe/manage-subscription", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          action,
-        }),
+      console.log(`=== ${action.toUpperCase()} SUBSCRIPTION START ===`)
+
+      // Add timeout for the entire operation
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`${action} operation timed out after 15 seconds`)), 15000)
       })
 
-      if (!response.ok) {
-        const errorData = await response.text()
-        console.error("Subscription management failed:", errorData)
-        throw new Error(`Failed to ${action} subscription`)
+      const operationPromise = async () => {
+        // Get auth token with timeout
+        console.log("Getting auth session...")
+
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        }
+
+        try {
+          // Add timeout for session call
+          const sessionTimeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("Session timeout")), 3000)
+          })
+
+          const sessionPromise = supabase.auth.getSession()
+          const {
+            data: { session },
+          } = (await Promise.race([sessionPromise, sessionTimeoutPromise])) as any
+
+          if (session?.access_token) {
+            headers.Authorization = `Bearer ${session.access_token}`
+            console.log("✅ Auth token obtained")
+          } else {
+            console.log("⚠️ No auth token, proceeding without auth header")
+          }
+        } catch (sessionError) {
+          console.log("⚠️ Session call failed, proceeding without auth:", sessionError)
+          // Continue without auth header - API should still work
+        }
+
+        console.log("Making API call to /api/stripe/manage-subscription...")
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+        try {
+          const response = await fetch("/api/stripe/manage-subscription", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              userId: user.id,
+              action,
+            }),
+            signal: controller.signal,
+          })
+
+          clearTimeout(timeoutId)
+          console.log(`${action} response status:`, response.status)
+
+          if (!response.ok) {
+            const errorText = await response.text()
+            console.error(`${action} failed:`, response.status, errorText)
+
+            let errorMessage
+            try {
+              const parsedError = JSON.parse(errorText)
+              errorMessage = parsedError.error || `Failed to ${action} subscription`
+            } catch {
+              errorMessage = `Server error (${response.status}): ${errorText.substring(0, 100)}`
+            }
+
+            throw new Error(errorMessage)
+          }
+
+          const result = await response.json()
+          console.log(`${action} result:`, result)
+
+          if (action === "portal" && result.url) {
+            window.open(result.url, "_blank")
+            setSuccess("✅ Billing portal opened in new tab")
+          } else if (action === "cancel") {
+            console.log("🔄 Refreshing user data after cancellation...")
+
+            // Try to refresh user data with timeout
+            try {
+              const refreshPromise = refreshUser()
+              const refreshTimeout = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error("User refresh timeout")), 5000)
+              })
+
+              await Promise.race([refreshPromise, refreshTimeout])
+              console.log("✅ User data refreshed successfully")
+            } catch (refreshError) {
+              console.log("⚠️ User refresh failed, but cancellation was successful:", refreshError)
+            }
+
+            setSuccess(
+              "✅ Subscription cancelled successfully! It will remain active until the end of your billing period.",
+            )
+          } else if (action === "reactivate") {
+            console.log("🔄 Refreshing user data after reactivation...")
+
+            try {
+              const refreshPromise = refreshUser()
+              const refreshTimeout = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error("User refresh timeout")), 5000)
+              })
+
+              await Promise.race([refreshPromise, refreshTimeout])
+              console.log("✅ User data refreshed successfully")
+            } catch (refreshError) {
+              console.log("⚠️ User refresh failed, but reactivation was successful:", refreshError)
+            }
+
+            setSuccess("✅ Subscription reactivated successfully!")
+          }
+        } catch (fetchError) {
+          clearTimeout(timeoutId)
+          if (fetchError instanceof Error && fetchError.name === "AbortError") {
+            throw new Error(`${action} request timed out after 10 seconds`)
+          }
+          throw fetchError
+        }
       }
 
-      const result = await response.json()
-
-      if (action === "portal" && result.url) {
-        window.open(result.url, "_blank")
-      } else {
-        // Refresh user data to get updated subscription status
-        await refreshUser()
-        setSuccess(`✅ Subscription ${action}ed successfully!`)
-      }
+      // Race the operation against the timeout
+      await Promise.race([operationPromise(), timeoutPromise])
     } catch (error) {
-      console.error("Error managing subscription:", error)
-      setError(error instanceof Error ? error.message : `Failed to ${action} subscription`)
+      console.error(`=== ${action.toUpperCase()} SUBSCRIPTION ERROR ===`)
+      console.error("Error:", error)
+
+      if (error instanceof Error && error.message.includes("timeout")) {
+        setError(
+          `Operation timed out. ${action === "cancel" ? "Your cancellation may have been processed - please refresh the page to check." : "Please try again."}`,
+        )
+      } else {
+        setError(error instanceof Error ? error.message : `Failed to ${action} subscription`)
+      }
     } finally {
       setActionLoading(null)
+      console.log(`=== ${action.toUpperCase()} SUBSCRIPTION END ===`)
     }
   }
 
@@ -225,6 +333,11 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
             </div>
             <div className="flex items-center gap-2">
               <Badge variant={isProUser ? "default" : "secondary"}>{isProUser ? "Pro" : "Free"}</Badge>
+              {isCanceling && (
+                <Badge variant="outline" className="text-amber-600 border-amber-600">
+                  Cancelling
+                </Badge>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -238,12 +351,25 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
               </span>
             </div>
 
-            {/* Subscription Details - REMOVED period end display */}
+            {/* Subscription Details */}
             {isProUser && (
               <div className="space-y-2 text-sm text-gray-600">
                 <p>
-                  <strong>Status:</strong> {isCanceling ? "Will cancel at next billing cycle" : "Active subscription"}
+                  <strong>Status:</strong>{" "}
+                  {isCanceling
+                    ? "Will cancel at next billing cycle"
+                    : user?.subscription_status === "active"
+                      ? "Active subscription"
+                      : `Subscription ${user?.subscription_status || "unknown"}`}
                 </p>
+                {isCanceling && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-amber-800 text-sm">
+                      <strong>⚠️ Cancellation Scheduled:</strong> Your subscription will remain active with full access
+                      until your next billing date. You can reactivate anytime before then.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -265,6 +391,7 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
                     {actionLoading === "portal" && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                     <CreditCard className="w-4 h-4 mr-2" />
                     Manage Billing
+                    <ExternalLink className="w-3 h-3 ml-1" />
                   </Button>
 
                   {!isCanceling ? (
@@ -272,6 +399,7 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
                       variant="outline"
                       onClick={() => handleManageSubscription("cancel")}
                       disabled={actionLoading === "cancel"}
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
                     >
                       {actionLoading === "cancel" && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                       <X className="w-4 h-4 mr-2" />
@@ -282,6 +410,7 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
                       variant="outline"
                       onClick={() => handleManageSubscription("reactivate")}
                       disabled={actionLoading === "reactivate"}
+                      className="text-green-600 hover:text-green-700 hover:bg-green-50"
                     >
                       {actionLoading === "reactivate" && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                       <Check className="w-4 h-4 mr-2" />
@@ -291,6 +420,50 @@ export function SubscriptionManager({ onClose }: SubscriptionManagerProps) {
                 </>
               )}
             </div>
+            {/* Add this after the existing action buttons div */}
+            {process.env.NODE_ENV === "development" && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                <p className="text-xs text-gray-600 mb-2">Development Tools:</p>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      console.log("=== TESTING API ROUTE ===")
+                      try {
+                        const response = await fetch("/api/stripe/manage-subscription", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            userId: user?.id,
+                            action: "cancel",
+                          }),
+                        })
+                        console.log("Test response status:", response.status)
+                        const data = await response.text()
+                        console.log("Test response:", data.substring(0, 500))
+                      } catch (err) {
+                        console.error("Test error:", err)
+                      }
+                    }}
+                  >
+                    🧪 Test Cancel API
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      console.log("=== CURRENT USER STATE ===")
+                      console.log("User:", user)
+                      console.log("Is Pro:", isProUser)
+                      console.log("Is Canceling:", isCanceling)
+                    }}
+                  >
+                    📊 Log User State
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
